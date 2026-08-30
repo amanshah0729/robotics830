@@ -144,7 +144,7 @@ def main() -> None:
     parser.add_argument("--id", default="hack_follower", help="Calibration id used with lerobot-calibrate")
     parser.add_argument("--urdf", default=str(DEFAULT_URDF), help="Path to so101_new_calib.urdf")
     parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--mode", choices=["claw", "joint"], default="claw", help="Starting control mode")
+    parser.add_argument("--mode", choices=["claw", "joint"], default="joint", help="Starting control mode")
     parser.add_argument("--step", type=float, default=0.003, help="Claw-mode metres per tick at base speed")
     parser.add_argument("--joint-step", type=float, default=1.2, help="Joint-mode degrees per tick at base speed")
     parser.add_argument("--orient-step", type=float, default=0.015, help="Claw-mode wrist radians per tick")
