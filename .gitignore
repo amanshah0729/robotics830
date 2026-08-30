@@ -10,6 +10,13 @@ wandb/
 
 # Muscle Memory derived data / indexes / models
 work/
+work-fixture/
+
+# SO-101 URDF + meshes — cloned on demand (keyboard_ee_teleop.py prints the command)
+SO-ARM100/
+
+# Xcode user state
+xcuserdata/
 
 # World Context dataset lives on the flash drive / local copy, never in git
 WORLD_CONTEXT_EXPLORER_V3/
