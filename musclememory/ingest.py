@@ -30,15 +30,20 @@ def ingest_clip(clip, embedder, out_dir: Path, window_s: float, stride_s: float,
     if len(centers) == 0:
         return 0
 
-    imus, feats, frame_batches = [], [], []
+    imus, feats = [], []
     for tc in centers:
         t0, t1 = tc - window_s / 2, tc + window_s / 2
         times, data, _names = clip.imu_window(t0, t1)
         imus.append(resample_window(times, data, t0, t1))
         feats.append(featurize(times, data))
-        if frames_per_window == 1:
-            frame_batches.append([clip.frame(tc, width=frame_width)])
-        else:
+
+    if frames_per_window == 1:
+        # one sequential decode pass per clip instead of a seek per window
+        frame_batches = [[im] for im in clip.frames_at(centers, width=frame_width)]
+    else:
+        frame_batches = []
+        for tc in centers:
+            t0, t1 = tc - window_s / 2, tc + window_s / 2
             ts = np.linspace(t0 + 0.2, t1 - 0.2, frames_per_window)
             frame_batches.append([clip.frame(t, width=frame_width) for t in ts])
 
