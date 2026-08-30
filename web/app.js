@@ -52,6 +52,11 @@ function resize() {
 
 function fitView() {
   const r = map.parentElement.getBoundingClientRect();
+  if (!r.width || !r.height) {
+    // layout not settled yet (fast localhost fetches can beat first layout)
+    requestAnimationFrame(() => { resize(); fitView(); draw(); });
+    return;
+  }
   S.view.scale = Math.min(r.width, r.height) * 0.42;
   S.view.tx = r.width / 2; S.view.ty = r.height / 2;
 }
