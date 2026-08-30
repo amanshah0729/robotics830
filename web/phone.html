@@ -5,23 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>Muscle Memory — phone sensor</title>
 <link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap">
 <style>
-  :root{ --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7;
-         --muted:#898781; --blue:#3987e5; --baseline:#383835; }
+  :root{ --ink:#fff; --ink2:#d3d2c9; --muted:#94928b; --blue:#3987e5;
+         --edge:rgba(255,255,255,.10); --glass:rgba(24,24,30,.55); }
   *{box-sizing:border-box}
-  body{margin:0; min-height:100dvh; background:var(--page); color:var(--ink);
-       font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+  body{margin:0; min-height:100dvh; color:var(--ink);
+       background:
+         radial-gradient(700px 500px at 15% -10%, rgba(57,135,229,.20), transparent 60%),
+         radial-gradient(600px 450px at 110% 110%, rgba(217,89,38,.14), transparent 60%),
+         linear-gradient(160deg,#0b0b11,#0a0a0e);
+       font:16px/1.5 "Airbnb Cereal VF","Airbnb Cereal App","Airbnb Cereal",
+            "Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
        display:flex; flex-direction:column; align-items:center; justify-content:center;
        gap:22px; padding:24px; text-align:center}
-  h1{font-size:1.1em; letter-spacing:.08em; margin:0}
-  #start{background:var(--blue); color:#fff; border:0; border-radius:14px;
-         font:600 1.2em/1 inherit; padding:22px 44px; cursor:pointer}
-  #start:disabled{opacity:.4}
-  #bar{width:min(340px,80vw); height:18px; background:var(--surface);
-       border-radius:9px; overflow:hidden}
-  #fill{height:100%; width:0; background:var(--blue)}
+  h1{font-size:1.1em; letter-spacing:.09em; margin:0; font-weight:800}
+  #start{color:#fff; border:1px solid rgba(255,255,255,.22); border-radius:99px;
+         font:700 1.2em/1 inherit; padding:22px 44px; cursor:pointer;
+         background:linear-gradient(rgba(255,255,255,.14),rgba(255,255,255,.02)), var(--blue);
+         box-shadow:0 10px 30px rgba(57,135,229,.35);
+         -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px)}
+  #start:disabled{opacity:.4; box-shadow:none}
+  #bar{width:min(340px,80vw); height:18px; border-radius:99px; overflow:hidden;
+       background:var(--glass); border:1px solid var(--edge);
+       -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px)}
+  #fill{height:100%; width:0; background:linear-gradient(90deg,var(--blue),#7db4f0)}
   #status{color:var(--muted); min-height:3em; max-width:36ch}
-  #match{color:var(--ink2); font-weight:600; min-height:1.5em}
+  #match{color:var(--ink2); font-weight:700; min-height:1.5em}
 </style>
 </head>
 <body>
