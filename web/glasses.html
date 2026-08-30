@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- MRBD renders in a fixed 600x600 viewport. Lock scale; never scroll. -->
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<title>Muscle Memory — glasses</title>
+<!-- SVG favicons are unsupported on MRBD; empty data URI avoids a 404 in dev. -->
+<link rel="icon" href="data:,">
+<style>
+  /* The display is an additive waveguide: black contributes zero light and
+     reads as fully transparent, bright saturated ink reads as solid. Every
+     surface here stays black; only type and rules emit. */
+  :root{
+    --ink:#ffffff;
+    --ink2:#9fe8ff;
+    --accent:#00d4ff;
+    --warn:#ffd166;
+    --bad:#ff5c5c;
+    --good:#5cff9d;
+    --dim:#8fa8b0;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{
+    width:600px; height:600px; overflow:hidden;
+    background:#000; color:var(--ink);
+    font:20px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .screen{
+    display:none; width:600px; height:600px;
+    padding:26px 30px; flex-direction:column; gap:14px;
+  }
+  .screen.on{display:flex}
+
+  header{
+    display:flex; justify-content:space-between; align-items:baseline;
+    border-bottom:2px solid var(--dim); padding-bottom:10px; flex:0 0 auto;
+  }
+  h1{font-size:22px; letter-spacing:.14em; font-weight:700; color:var(--ink)}
+  .tag{font-size:18px; letter-spacing:.08em; color:var(--ink2)}
+
+  /* MRBD minimum tap target is 88px tall. Focus ring must be unmistakable. */
+  .focusable{
+    display:flex; align-items:center; gap:14px;
+    min-height:88px; padding:0 22px;
+    border:3px solid transparent; border-radius:14px;
+    background:#000; color:var(--ink); font:600 24px/1 inherit;
+    text-align:left; width:100%; cursor:pointer;
+    transition:border-color 120ms ease, color 120ms ease;
+  }
+  .focusable:focus{ outline:none; border-color:var(--accent); color:var(--accent) }
+  .focusable .k{font-size:30px; width:40px; text-align:center}
+
+  /* ---- live screen ---- */
+  #task{
+    font-size:46px; line-height:1.1; font-weight:700; color:var(--accent);
+    /* two lines max at 600px wide; clip rather than reflow the layout */
+    max-height:2.2em; overflow:hidden;
+  }
+  #score{font-size:26px; color:var(--ink2)}
+  #runners{display:flex; flex-direction:column; gap:6px; font-size:19px; color:var(--ink2)}
+  #runners div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+
+  .barwrap{height:16px; background:#0d1416; border:2px solid var(--dim); border-radius:9px; overflow:hidden}
+  .barwrap i{display:block; height:100%; width:0; background:var(--accent)}
+
+  footer{
+    margin-top:auto; flex:0 0 auto; display:flex; justify-content:space-between;
+    font-size:17px; color:var(--dim); border-top:2px solid var(--dim); padding-top:10px;
+  }
+  .dot{display:inline-block; width:12px; height:12px; border-radius:50%; background:var(--bad); vertical-align:middle}
+  .dot.ok{background:var(--good)} .dot.warm{background:var(--warn)}
+
+  /* ---- camera feed ---- */
+  #feedwrap{
+    flex:1 1 auto; display:flex; align-items:center; justify-content:center;
+    border:2px solid var(--dim); border-radius:12px; overflow:hidden; background:#000;
+  }
+  /* A photographic feed is the one thing this display renders badly — it adds
+     light rather than painting it, so mid-tones wash out against the room.
+     Fine as a transport proof; a vector overlay is what ships. */
+  #feed{max-width:100%; max-height:100%; object-fit:contain; display:block}
+  #feedmsg{color:var(--ink2); font-size:20px; padding:20px; text-align:center}
+
+  /* ---- diagnostics ---- */
+  #diag{font:17px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink2)}
+  #diag .row{display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid #17242a; padding:5px 0}
+  #diag .row b{color:var(--ink); font-weight:600}
+  #probe{width:120px; height:68px; object-fit:cover; border:2px solid var(--dim); border-radius:6px; background:#000}
+  .hint{font-size:17px; color:var(--dim)}
+</style>
+</head>
+<body>
+
+<!-- ============ HOME ============ -->
+<section id="s-home" class="screen on">
+  <header><h1>MUSCLE MEMORY</h1><span class="tag">HEAD IMU</span></header>
+  <p class="hint">Head-mounted motion, queried against head-mounted training
+     data. Swipe to move, pinch to select.</p>
+  <button class="focusable" data-go="live"><span class="k">▶</span>Start motion search</button>
+  <button class="focusable" data-go="feed"><span class="k">◉</span>Camera feed</button>
+  <button class="focusable" data-go="diag"><span class="k">⚙</span>Diagnostics</button>
+  <footer><span>swipe ↑↓ · pinch = select</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
+</section>
+
+<!-- ============ LIVE ============ -->
+<section id="s-live" class="screen">
+  <header><h1>MATCH</h1><span class="tag" id="space">—</span></header>
+  <div id="task">waiting for motion…</div>
+  <div id="score"></div>
+  <div class="barwrap"><i id="energy"></i></div>
+  <div id="runners"></div>
+  <footer><span id="rate">0 Hz</span><span id="live-ws"><span class="dot"></span> offline</span></footer>
+</section>
+
+<!-- ============ CAMERA FEED ============ -->
+<section id="s-feed" class="screen">
+  <header><h1>FEED</h1><span class="tag" id="feed-src">phone</span></header>
+  <div id="feedwrap"><div id="feedmsg">waiting for a frame…</div></div>
+  <footer><span id="feed-fps">0.0 fps</span><span id="feed-age">—</span></footer>
+</section>
+
+<!-- ============ DIAGNOSTICS ============ -->
+<section id="s-diag" class="screen">
+  <header><h1>DIAGNOSTICS</h1><span class="tag">smoke test</span></header>
+  <div id="diag">
+    <div class="row"><span>websocket</span><b id="d-ws">—</b></div>
+    <div class="row"><span>imu permission</span><b id="d-perm">—</b></div>
+    <div class="row"><span>imu sample rate</span><b id="d-rate">—</b></div>
+    <div class="row"><span>gestures (newest first)</span><b id="d-key">—</b></div>
+    <div class="row"><span>img refresh</span><b id="d-img">—</b></div>
+    <div class="row"><span>viewport</span><b id="d-vp">—</b></div>
+  </div>
+  <div style="display:flex; gap:16px; align-items:center">
+    <img id="probe" alt="">
+    <span class="hint">If this thumbnail updates, remote video-as-frames works.</span>
+  </div>
+  <button class="focusable" data-go="home"><span class="k">←</span>Back</button>
+  <footer><span>proves: net · sensors · input · images</span></footer>
+</section>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------------------
+   MRBD input: the glasses OS translates Neural Band pinches and temple-strip
+   swipes into plain arrow/Enter key events. There is no mouse, touch, or text
+   entry, so every interactive element must be reachable by focus alone.
+   Middle pinch is reserved by the system (Restart/Resume/Permissions) — never
+   bind it.
+--------------------------------------------------------------------------- */
+const KEY = { UP:"ArrowUp", DOWN:"ArrowDown", LEFT:"ArrowLeft", RIGHT:"ArrowRight",
+              SELECT:"Enter", BACK:"Escape" };
+
+const $  = (id) => document.getElementById(id);
+const screens = { home:$("s-home"), live:$("s-live"), feed:$("s-feed"), diag:$("s-diag") };
+let current = "home";
+
+function show(name){
+  for (const k in screens) screens[k].classList.toggle("on", k === name);
+  current = name;
+  const first = screens[name].querySelector(".focusable");
+  if (first) first.focus();
+  if (name === "diag") probeTick();
+  if (name === "feed") feedTick();
+}
+
+function focusables(){
+  return Array.from(screens[current].querySelectorAll(".focusable:not([disabled])"));
+}
+
+function moveFocus(delta){
+  const f = focusables();
+  if (!f.length) return;
+  let i = f.indexOf(document.activeElement);
+  i = i === -1 ? 0 : (i + delta + f.length) % f.length;
+  f[i].focus();
+}
+
+/* Gesture→key mapping is worth confirming empirically on first wear rather
+   than trusting the table: log a short rolling history so each swipe and pinch
+   can be identified by doing it. */
+const GLYPH = { ArrowUp:"\u2191", ArrowDown:"\u2193", ArrowLeft:"\u2190",
+                ArrowRight:"\u2192", Enter:"\u23CE", Escape:"\u238B" };
+const keyLog = [];
+
+document.addEventListener("keydown", (e) => {
+  keyLog.unshift(GLYPH[e.key] || e.key);
+  keyLog.length = Math.min(keyLog.length, 8);
+  $("d-key").textContent = keyLog.join(" ");
+  switch (e.key){
+    case KEY.UP: case KEY.LEFT:    moveFocus(-1); break;
+    case KEY.DOWN: case KEY.RIGHT: moveFocus(+1); break;
+    case KEY.SELECT:
+      if (document.activeElement && document.activeElement.classList.contains("focusable"))
+        document.activeElement.click();
+      break;
+    case KEY.BACK:
+      // No browser history on MRBD — route back in-app instead.
+      if (current !== "home") show("home");
+      break;
+    default: return;
+  }
+  e.preventDefault();
+});
+
+document.querySelectorAll("[data-go]").forEach((b) => {
+  b.addEventListener("click", () => {
+    const dest = b.dataset.go;
+    if (dest === "live") startMotion();
+    show(dest);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+   Transport. Reuses the existing /ws/phone contract verbatim:
+     send    {samples: [[t, ax,ay,az, gx,gy,gz], ...]}
+     receive {type:"matches", space, energy, matches:[{task,score,clip,t}]}
+   The page is served over HTTPS on the glasses, so this resolves to wss://.
+--------------------------------------------------------------------------- */
+let ws = null, buf = [], sampleCount = 0, lastRateAt = performance.now();
+
+function setWs(state, cls){
+  $("d-ws").textContent = state;
+  for (const id of ["home-ws","live-ws"]){
+    const el = $(id);
+    el.innerHTML = '<span class="dot ' + cls + '"></span> ' + state;
+  }
+}
+
+function connect(){
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  setWs("connecting", "warm");
+  ws = new WebSocket(proto + "://" + location.host + "/ws/phone");
+  ws.onopen    = () => setWs("live", "ok");
+  ws.onerror   = () => setWs("error", "");
+  ws.onclose   = () => { setWs("reconnecting", "warm"); setTimeout(connect, 1500); };
+  ws.onmessage = (e) => render(JSON.parse(e.data));
+}
+
+function render(msg){
+  if (msg.type !== "matches" || !msg.matches || !msg.matches.length) return;
+  const [top, ...rest] = msg.matches;
+  $("task").textContent  = top.task.replace(/[_-]+/g, " ");
+  $("score").textContent = "confidence " + top.score.toFixed(2);
+  $("space").textContent = msg.space || "—";
+  $("energy").style.width = Math.min(100, (msg.energy || 0) * 55) + "%";
+  $("runners").innerHTML = rest.slice(0, 3).map((m) =>
+    "<div>" + m.task.replace(/[_-]+/g, " ") + " · " + m.score.toFixed(2) + "</div>").join("");
+}
+
+/* Ship whatever accumulated every 150 ms — matches web/phone.html cadence so
+   the server's existing windowing and 0.7 s rate limit behave identically. */
+setInterval(() => {
+  if (ws && ws.readyState === 1 && buf.length){
+    ws.send(JSON.stringify({ samples: buf }));
+    buf = [];
+  }
+}, 150);
+
+function onMotion(e){
+  const a = e.accelerationIncludingGravity || e.acceleration || {};
+  const r = e.rotationRate || {};
+  const D = Math.PI / 180;   // DeviceMotionEvent is deg/s; the bank is rad/s.
+  buf.push([performance.now() / 1000,
+            a.x || 0, a.y || 0, a.z || 0,
+            (r.alpha || 0) * D, (r.beta || 0) * D, (r.gamma || 0) * D]);
+  sampleCount++;
+}
+
+/* Motion permission must be requested from a real user gesture — this runs off
+   the Enter press on "Start", never on load, or the prompt is suppressed. */
+async function startMotion(){
+  try {
+    if (typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function"){
+      const p = await DeviceMotionEvent.requestPermission();
+      $("d-perm").textContent = p;
+      if (p !== "granted"){ $("task").textContent = "motion permission denied"; return; }
+    } else {
+      $("d-perm").textContent = "granted (implicit)";
+    }
+    window.addEventListener("devicemotion", onMotion);
+    if (!ws) connect();
+  } catch (err){
+    $("d-perm").textContent = "error";
+    $("task").textContent = "sensors unavailable";
+  }
+}
+
+setInterval(() => {
+  const now = performance.now();
+  const hz = sampleCount / ((now - lastRateAt) / 1000);
+  sampleCount = 0; lastRateAt = now;
+  const s = hz.toFixed(0) + " Hz";
+  $("rate").textContent = s; $("d-rate").textContent = s;
+}, 1000);
+
+/* Image-refresh probe. /api/frame is an existing JPEG endpoint, so this answers
+   "can the glasses show a remote camera as swapped frames?" without <video>. */
+let probeN = 0;
+function probeTick(){
+  if (current !== "diag") return;
+  const img = $("probe");
+  img.onload  = () => { $("d-img").textContent = "ok (" + (++probeN) + ")"; };
+  img.onerror = () => { $("d-img").textContent = "failed"; };
+  img.src = "/api/frame?row=0&w=160&cb=" + Date.now();
+  setTimeout(probeTick, 200);   // ~5 fps, plenty for jog-rate feedback
+}
+
+/* ---------------------------------------------------------------------------
+   Camera feed. Swapping <img>.src beats <video> here: video playback is
+   undocumented on MRBD, whereas images are ordinary browser behaviour and the
+   diagnostics probe already confirms they refresh. Frame-at-a-time also suits
+   a high-latency link — each frame stands alone, so a dropped one costs
+   nothing and there is no stream to resynchronise.
+--------------------------------------------------------------------------- */
+const FEED_MS = 200;                       // ~5 fps; matches the push cadence
+let feedImg = null, feedShown = 0, feedTickAt = performance.now(), feedCount = 0;
+
+function feedTick(){
+  if (current !== "feed") return;
+  if (!feedImg){
+    feedImg = new Image();
+    feedImg.id = "feed";
+    feedImg.onload = () => {
+      const wrap = $("feedwrap");
+      if (feedImg.parentNode !== wrap){ wrap.innerHTML = ""; wrap.appendChild(feedImg); }
+      feedShown++; feedCount++;
+      $("feed-age").textContent = "live";
+    };
+    feedImg.onerror = () => {
+      if (!feedShown) $("feedmsg").textContent =
+        "no frames yet — open /camera on your phone and press Start";
+      $("feed-age").textContent = "stale";
+    };
+  }
+  feedImg.src = "/api/cam/latest?cb=" + Date.now();
+  setTimeout(feedTick, FEED_MS);
+}
+
+setInterval(() => {
+  const now = performance.now();
+  $("feed-fps").textContent =
+    (feedCount / ((now - feedTickAt) / 1000)).toFixed(1) + " fps";
+  feedCount = 0; feedTickAt = now;
+}, 1000);
+
+$("d-vp").textContent = window.innerWidth + "x" + window.innerHeight;
+show("home");
+</script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Muscle Memory — camera source</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{ --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7;
+         --muted:#898781; --blue:#3987e5; --good:#5cff9d; --bad:#ff5c5c; }
+  *{box-sizing:border-box}
+  body{margin:0; min-height:100dvh; background:var(--page); color:var(--ink);
+       font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+       display:flex; flex-direction:column; align-items:center;
+       gap:16px; padding:20px; text-align:center}
+  h1{font-size:1.05em; letter-spacing:.08em; margin:0}
+  button{background:var(--blue); color:#fff; border:0; border-radius:14px;
+         font:600 1.1em/1 inherit; padding:18px 34px; cursor:pointer}
+  button:disabled{opacity:.4}
+  video{display:none}
+  canvas{width:min(320px,84vw); border-radius:12px; background:#000;
+         border:1px solid #2a2a28}
+  #stats{display:flex; gap:18px; font:14px/1.4 ui-monospace,Menlo,monospace;
+         color:var(--ink2); flex-wrap:wrap; justify-content:center}
+  #status{color:var(--muted); max-width:34ch; min-height:3em}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+       background:var(--bad);vertical-align:middle;margin-right:5px}
+  .dot.ok{background:var(--good)}
+  label{color:var(--muted); font-size:14px; display:flex; align-items:center; gap:8px}
+</style>
+</head>
+<body>
+<h1>MUSCLE MEMORY · CAMERA SOURCE</h1>
+<video id="v" playsinline muted></video>
+<canvas id="c"></canvas>
+<div id="stats">
+  <span><span class="dot" id="dot"></span><span id="state">idle</span></span>
+  <span id="fps">0.0 fps</span>
+  <span id="kb">0 KB</span>
+  <span id="sent">0 sent</span>
+</div>
+<label><input type="checkbox" id="rear" checked> rear camera</label>
+<button id="start">Start camera</button>
+<div id="status">Point this phone at the work. Frames go to the server; the
+  glasses pull the newest one. Keep the screen awake — iOS suspends capture
+  when the display sleeps.</div>
+
+<script>
+"use strict";
+/* ---------------------------------------------------------------------------
+   Capture source for the MRBD pipeline.
+
+   This page does NOT run on the glasses — MRBD Web Apps have no camera, and
+   the paired phone is a transport relay rather than a device the glasses page
+   can address. So a normal phone browser captures here, POSTs JPEGs to the
+   server, and /glasses pulls the newest frame as an <img>. Same shape as the
+   robot-arm camera will be: only the source changes.
+
+   getUserMedia requires a secure context, so this must be loaded over the
+   HTTPS tunnel, not a LAN IP.
+--------------------------------------------------------------------------- */
+const $ = (id) => document.getElementById(id);
+const v = $("v"), c = $("c"), ctx = c.getContext("2d");
+
+const SEND_MS = 150;      // ~6.7 fps ceiling; the glasses poll slower than this
+const WIDTH   = 480;      // downscale before encode — bandwidth, not detail
+const QUALITY = 0.5;
+
+let timer = null, inflight = false, sent = 0, lastTick = performance.now(), frames = 0;
+
+function setState(text, ok){
+  $("state").textContent = text;
+  $("dot").className = "dot" + (ok ? " ok" : "");
+}
+
+async function pushFrame(){
+  // Drop rather than queue: a slow link should cost frames, never latency.
+  if (inflight) return;
+  const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", QUALITY));
+  if (!blob) return;
+  inflight = true;
+  try {
+    const res = await fetch("/api/cam/push", {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg" },
+      body: blob,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    sent++; frames++;
+    $("sent").textContent = sent + " sent";
+    $("kb").textContent = (blob.size / 1024).toFixed(0) + " KB";
+    setState("streaming", true);
+  } catch (err) {
+    setState("push failed", false);
+  } finally {
+    inflight = false;
+  }
+}
+
+function draw(){
+  if (v.videoWidth){
+    const h = Math.round(WIDTH * v.videoHeight / v.videoWidth);
+    if (c.width !== WIDTH){ c.width = WIDTH; c.height = h; }
+    ctx.drawImage(v, 0, 0, WIDTH, h);
+  }
+  requestAnimationFrame(draw);
+}
+
+setInterval(() => {
+  const now = performance.now();
+  $("fps").textContent = (frames / ((now - lastTick) / 1000)).toFixed(1) + " fps";
+  frames = 0; lastTick = now;
+}, 1000);
+
+$("start").addEventListener("click", async () => {
+  try {
+    setState("requesting camera", false);
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: $("rear").checked ? "environment" : "user",
+               width: { ideal: 960 } },
+      audio: false,
+    });
+    v.srcObject = stream;
+    await v.play();
+    $("start").disabled = true;
+    $("status").textContent = "Streaming. Open /glasses on the Meta Ray-Ban " +
+      "Display and pick Camera feed.";
+    draw();
+    timer = setInterval(pushFrame, SEND_MS);
+    setState("streaming", true);
+  } catch (err) {
+    setState("camera blocked", false);
+    $("status").textContent = "Camera unavailable: " + err.name +
+      ". getUserMedia needs HTTPS — load this page through the cloudflared " +
+      "tunnel, not a LAN IP.";
+  }
+});
+</script>
+</body>
+</html>

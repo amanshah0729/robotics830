@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -137,6 +137,21 @@ def build_app(args) -> FastAPI:
     @app.get("/phone")
     def phone():
         return FileResponse(WEB_DIR / "phone.html")
+
+    @app.get("/camera")
+    def camera():
+        """Capture source: runs in a normal phone browser, not on the glasses.
+        MRBD Web Apps have no camera, and the paired phone is a relay rather
+        than something the glasses page can reach — so frames have to make the
+        trip out to this server and back."""
+        return FileResponse(WEB_DIR / "camera.html")
+
+    @app.get("/glasses")
+    def glasses():
+        """Meta Ray-Ban Display client. Same /ws/phone motion contract, but the
+        IMU is head-mounted like the World Context capture rig, so queries hit
+        the bank without the wrist/pocket placement gap."""
+        return FileResponse(WEB_DIR / "glasses.html")
 
     @app.get("/api/meta")
     def meta():
@@ -262,6 +277,33 @@ def build_app(args) -> FastAPI:
         times, data = samples[:, 0], samples[:, 1:7]
         matches, space = S.motion_query(times, data, k=int(payload.get("k", 8)))
         return {"space": space, "matches": matches}
+
+    # ---------------- camera relay ----------------
+    # Deliberately last-frame-wins with no queue: a stalled consumer should see
+    # a fresh frame when it comes back, never work through a backlog of stale
+    # ones. Frames are small and disposable, so nothing is persisted.
+    cam = {"jpeg": None, "at": 0.0, "n": 0}
+
+    @app.post("/api/cam/push")
+    async def cam_push(request: Request):
+        body = await request.body()
+        if not body:
+            raise HTTPException(400, "empty frame")
+        cam["jpeg"], cam["at"], cam["n"] = body, time.time(), cam["n"] + 1
+        return {"ok": True, "n": cam["n"], "bytes": len(body)}
+
+    @app.get("/api/cam/latest")
+    def cam_latest():
+        if cam["jpeg"] is None:
+            raise HTTPException(404, "no frame pushed yet")
+        return Response(cam["jpeg"], media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/cam/status")
+    def cam_status():
+        return {"frames": cam["n"],
+                "age_s": round(time.time() - cam["at"], 2) if cam["n"] else None,
+                "bytes": len(cam["jpeg"]) if cam["jpeg"] else 0}
 
     # ---------------- live phone bridge ----------------
 
