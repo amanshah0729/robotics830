@@ -89,6 +89,12 @@
     object-fit:contain; display:none;
   }
   #feed.on{display:block}
+  /* Fullscreen drops the chrome so the frame gets all 600x600. Worth a toggle
+     rather than a default: the fps and link state in the footer are what tell
+     you the feed is alive when the picture is too dim to be sure. */
+  #s-feed.fs{padding:0}
+  #s-feed.fs header, #s-feed.fs footer{display:none}
+  #s-feed.fs #feedwrap{border:0; border-radius:0}
   /* Raw camera mid-tones are the worst case for an additive display: they add
      a dim haze that the lit room behind simply beats. Crushing blacks down and
      driving everything else up trades fidelity for being visible at all. */
@@ -116,7 +122,7 @@
   <button class="focusable" data-go="live"><span class="k">▶</span>Start motion search</button>
   <button class="focusable" data-go="feed"><span class="k">◉</span>Camera feed</button>
   <button class="focusable" data-go="diag"><span class="k">⚙</span>Diagnostics</button>
-  <footer><span>swipe ↑↓ · pinch = select · b140117</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
+  <footer><span>swipe ↑↓ · pinch = select · b140437</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
 </section>
 
 <!-- ============ LIVE ============ -->
@@ -131,7 +137,7 @@
 
 <!-- ============ CAMERA FEED ============ -->
 <section id="s-feed" class="screen">
-  <header><h1>FEED</h1><span class="tag" id="feed-src">phone</span></header>
+  <header><h1>FEED</h1><span class="tag" id="feed-src">mono</span></header>
   <div id="feedwrap">
     <img id="feed" alt="">
     <div id="feedmsg">waiting for a frame…</div>
@@ -181,6 +187,7 @@ function show(name){
   const first = screens[name].querySelector(".focusable");
   if (first) first.focus();
   if (name === "diag") probeTick();
+  if (name !== "feed") $("s-feed").classList.remove("fs");
   if (name === "feed") feedTick(++feedLoop);
 }
 
@@ -220,8 +227,12 @@ document.addEventListener("keydown", (e) => {
       if (current === "feed") setFeedMode(feedMode + 1); else moveFocus(+1);
       break;
     case KEY.SELECT:
-      if (document.activeElement && document.activeElement.classList.contains("focusable"))
+      if (current === "feed"){
+        $("s-feed").classList.toggle("fs");
+      } else if (document.activeElement &&
+                 document.activeElement.classList.contains("focusable")){
         document.activeElement.click();
+      }
       break;
     case KEY.BACK:
       // No browser history on MRBD — route back in-app instead.

@@ -42,6 +42,20 @@
   <span id="sent">0 sent</span>
 </div>
 <label><input type="checkbox" id="rear" checked> rear camera</label>
+<label>size
+  <select id="size">
+    <option value="small">small 320x240</option>
+    <option value="medium" selected>medium 400x300</option>
+    <option value="large">large 512x384</option>
+  </select>
+</label>
+<label>quality
+  <select id="q">
+    <option value="0.35">low</option>
+    <option value="0.45" selected>medium</option>
+    <option value="0.6">high</option>
+  </select>
+</label>
 <button id="start">Start camera</button>
 <div id="status">Point this phone at the work. Frames go to the server; the
   glasses pull the newest one. Keep the screen awake — iOS suspends capture
@@ -65,8 +79,15 @@ const $ = (id) => document.getElementById(id);
 const v = $("v"), c = $("c"), ctx = c.getContext("2d");
 
 const SEND_MS = 150;      // ~6.7 fps ceiling; the glasses poll slower than this
-const WIDTH   = 480;      // downscale before encode — bandwidth, not detail
-const QUALITY = 0.5;
+
+// The glasses render into a 600x600 box, so a tall portrait frame spends most
+// of its bytes on letterbox bars that get thrown away. Centre-crop to 4:3 and
+// send only what can actually be shown -- roughly a third of the pixels, and
+// the pull leg to the glasses is bandwidth-bound, so that is most of the frame
+// rate. Presets are exposed because the right one depends on the venue's link.
+const PRESETS = { small: [320, 240], medium: [400, 300], large: [512, 384] };
+let TARGET = PRESETS.medium;
+let QUALITY = 0.45;
 
 let timer = null, inflight = false, sent = 0, lastTick = performance.now(), frames = 0;
 
@@ -101,9 +122,15 @@ async function pushFrame(){
 
 function draw(){
   if (v.videoWidth){
-    const h = Math.round(WIDTH * v.videoHeight / v.videoWidth);
-    if (c.width !== WIDTH){ c.width = WIDTH; c.height = h; }
-    ctx.drawImage(v, 0, 0, WIDTH, h);
+    const [tw, th] = TARGET;
+    if (c.width !== tw){ c.width = tw; c.height = th; }
+    // Centre-crop the source to the target aspect, so holding the phone
+    // upright still yields the landscape view a fixed camera would give.
+    const srcAR = v.videoWidth / v.videoHeight, dstAR = tw / th;
+    let sw = v.videoWidth, sh = v.videoHeight, sx = 0, sy = 0;
+    if (srcAR > dstAR){ sw = v.videoHeight * dstAR; sx = (v.videoWidth - sw) / 2; }
+    else              { sh = v.videoWidth / dstAR;  sy = (v.videoHeight - sh) / 2; }
+    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, tw, th);
   }
   requestAnimationFrame(draw);
 }
@@ -118,6 +145,8 @@ setInterval(() => {
 // still disabled from a previous run, which looks exactly like a dead button.
 // Never trust the restored state.
 $("start").disabled = false;
+$("size").addEventListener("change", (e) => { TARGET = PRESETS[e.target.value]; });
+$("q").addEventListener("change", (e) => { QUALITY = parseFloat(e.target.value); });
 
 $("start").addEventListener("click", async () => {
   try {
