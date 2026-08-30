@@ -71,8 +71,8 @@ PRECISION = {pk.Key.alt, pk.Key.alt_l, pk.Key.alt_r}
 # moves opposite to what feels right.
 JOINT_AXES = [
     ("shoulder_pan", LEFT, RIGHT),
-    ("shoulder_lift", FWD, BACK),
-    ("elbow_flex", PITCH_UP, PITCH_DOWN),
+    ("shoulder_lift", BACK, FWD),
+    ("elbow_flex", PITCH_DOWN, PITCH_UP),
     ("wrist_flex", YAW_LEFT, YAW_RIGHT),
     ("wrist_roll", ROLL_CCW, ROLL_CW),
 ]
