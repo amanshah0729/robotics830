@@ -80,12 +80,28 @@ JOINT_AXES = [
 # four degrees of freedom claw mode consumes. Orientation is left out on
 # purpose: at --orient-weight 0.1 the IK is effectively position-only, so it
 # picks better wrist angles than an operator could at 4 fps over a relay.
-GLASSES_AXES = {
+# Claw mode drives the tip through space, so the glasses' four directions map
+# to translation. Joint mode has no Z at all -- UP/DOWN go unread there -- so
+# it gets its own map onto the joints that matter for reaching and grabbing.
+# Whichever mode the loop is in picks the map; otherwise two of the eight
+# commands silently do nothing, which reads as a broken link rather than a
+# mode mismatch.
+GLASSES_AXES_CLAW = {
     "+X": FWD,  "-X": BACK,
     "+Y": RIGHT, "-Y": LEFT,
     "+Z": UP,   "-Z": DOWN,
     "GRIP+": GRIP_OPEN, "GRIP-": GRIP_CLOSE,
 }
+GLASSES_AXES_JOINT = {
+    "+X": FWD,      "-X": BACK,          # shoulder_lift
+    "+Y": RIGHT,    "-Y": LEFT,          # shoulder_pan
+    "+Z": PITCH_UP, "-Z": PITCH_DOWN,    # elbow_flex
+    "GRIP+": GRIP_OPEN, "GRIP-": GRIP_CLOSE,
+}
+
+
+def glasses_axes(mode: str) -> dict:
+    return GLASSES_AXES_JOINT if mode == "joint" else GLASSES_AXES_CLAW
 
 HOME_POSE = {  # calibrated middle pose: 0 deg on every joint, claw half-open
     "shoulder_pan": 0.0,
@@ -218,7 +234,7 @@ def main() -> None:
     # -- worth having when the demo depends on a tunnel staying up.
     glasses = None
     if args.glasses:
-        glasses = GlassesJog(args.glasses, GLASSES_AXES, keys.pressed,
+        glasses = GlassesJog(args.glasses, glasses_axes(args.mode), keys.pressed,
                              hold_s=args.glasses_hold,
                              on_event=lambda m: print(f"  [glasses] {m}", flush=True)).start()
         print(f"Taking Ray-Ban Display jogs from {args.glasses}")
@@ -262,6 +278,8 @@ def main() -> None:
             tab_down = MODE_TOGGLE in keys.pressed
             if tab_down and not tab_was_down:
                 mode = "joint" if mode == "claw" else "claw"
+                if glasses is not None:
+                    glasses.keymap = glasses_axes(mode)
                 print(f"MODE: {mode.upper()}")
             tab_was_down = tab_down
 
