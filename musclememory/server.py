@@ -318,23 +318,28 @@ def build_app(args) -> FastAPI:
 
     @app.websocket("/ws/cam")
     async def ws_cam(ws: WebSocket):
-        """Push frames instead of letting the client poll for them.
+        """Newest-frame-on-demand over one long-lived socket.
 
-        Polling costs a full round trip per frame, so the frame rate collapses
-        to 1/latency no matter how small the JPEG is -- which is why shrinking
-        the payload changed nothing. Awaiting each send paces this loop to
-        whatever the client can actually drain, so a slow link drops frames
-        rather than building a backlog of stale ones.
+        Free-running push looked right and was not: send_bytes hands the frame
+        to the transport rather than waiting for the wire, so a server
+        producing 8 fps into a client draining 5 fps queues the difference
+        forever. The picture stays smooth and drifts further behind reality
+        every second -- about ten seconds of lag inside a minute.
+
+        So the client asks for each frame and gets whatever is newest when the
+        request lands. One frame in flight, everything that accumulated in the
+        meantime skipped. A slow link costs frame rate, never freshness, which
+        is the correct trade for a view someone is steering by.
         """
         await ws.accept()
-        sent_n = -1
+        last_sent = -1
         try:
             while True:
-                if cam["jpeg"] is not None and cam["n"] != sent_n:
-                    sent_n = cam["n"]
-                    await ws.send_bytes(cam["jpeg"])
-                else:
-                    await asyncio.sleep(0.02)
+                await ws.receive_text()          # any message means "next frame"
+                while cam["jpeg"] is None or cam["n"] == last_sent:
+                    await asyncio.sleep(0.015)   # nothing new yet; hold the request
+                last_sent = cam["n"]
+                await ws.send_bytes(cam["jpeg"])
         except (WebSocketDisconnect, RuntimeError):
             pass
 
