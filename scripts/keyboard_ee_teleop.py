@@ -11,7 +11,10 @@
     F close claw (hold)   R open claw (hold)
     SHIFT sprint x3   ALT/OPTION precision x0.25
     H (hold) glide back to the calibrated middle pose
+    P pause/resume — freezes the arm and ignores keys so you can type elsewhere
     TAB switch mode   ESC quit (arm holds pose)
+
+Claw-mode W/A/S/D are TABLE directions (fixed), not claw-facing directions.
 
 Keys are global hotkeys (terminal app needs Accessibility permission) - they
 fire even when another window has focus.
@@ -56,6 +59,7 @@ YAW_LEFT, YAW_RIGHT = pk.Key.left, pk.Key.right
 ROLL_CCW, ROLL_CW = ("vk", VK_Q), ("vk", VK_E)
 GRIP_CLOSE, GRIP_OPEN = ("vk", VK_F), ("vk", VK_R)
 HOME = ("vk", VK_H)
+PAUSE = ("vk", 35)  # P — freeze the arm and ignore keys (type safely elsewhere)
 MODE_TOGGLE = pk.Key.tab
 SPRINT = {pk.Key.shift, pk.Key.shift_l, pk.Key.shift_r}
 PRECISION = {pk.Key.alt, pk.Key.alt_l, pk.Key.alt_r}
@@ -202,12 +206,28 @@ def main() -> None:
 
     dt = 1.0 / args.fps
     tab_was_down = False
+    pause_was_down = False
+    paused = False
+    last_action = None
     try:
         while not keys.stop:
             t0 = time.perf_counter()
 
             obs = robot.get_observation()
             meas = {n: float(obs[f"{n}.pos"]) for n in motor_names}
+
+            pause_down = PAUSE in keys.pressed
+            if pause_down and not pause_was_down:
+                paused = not paused
+                print("PAUSED — keys ignored, arm holding. P to resume." if paused else "RESUMED")
+                if not paused:
+                    last_ctrl = None  # re-sync targets to wherever the arm is now
+            pause_was_down = pause_down
+
+            if paused:
+                robot.send_action(last_action or {f"{n}.pos": meas[n] for n in motor_names})
+                time.sleep(max(0.0, dt - (time.perf_counter() - t0)))
+                continue
 
             tab_down = MODE_TOGGLE in keys.pressed
             if tab_down and not tab_was_down:
@@ -261,6 +281,11 @@ def main() -> None:
                 wz = keys.axis(ROLL_CCW, ROLL_CW) * args.orient_step * speed
                 if wx or wy or wz:
                     ee_pose[:3, :3] = ee_pose[:3, :3] @ Rotation.from_rotvec([wx, wy, wz]).as_matrix()
+                    # round-trip through rotvec to re-orthonormalize (accumulated
+                    # matrix products drift numerically and eventually corrupt IK)
+                    ee_pose[:3, :3] = Rotation.from_rotvec(
+                        Rotation.from_matrix(ee_pose[:3, :3]).as_rotvec()
+                    ).as_matrix()
 
                 # leash the position target to the claw's real position
                 q = np.array([meas[n] for n in motor_names])
@@ -281,8 +306,18 @@ def main() -> None:
                     "ee.gripper_pos": joint_targets["gripper"],
                 }
                 action = ee_to_joints((ee_action, obs))
+                # Rate-leash the IK output: near singularities the solver can
+                # jump to a distant joint configuration — never let one tick
+                # command more than the leash away from where the arm really is.
+                for n in arm_joints:
+                    key = f"{n}.pos"
+                    if key in action:
+                        action[key] = clamp(
+                            float(action[key]), meas[n] - args.leash, meas[n] + args.leash
+                        )
 
             robot.send_action(action)
+            last_action = action
 
             time.sleep(max(0.0, dt - (time.perf_counter() - t0)))
     except KeyboardInterrupt:
