@@ -348,6 +348,7 @@ def build_app(args) -> FastAPI:
     # built and verified before an arm exists, the same way the camera relay
     # was. A real controller subscribes here and applies the deltas.
     jog_log: deque = deque(maxlen=200)
+    jog_subs: set = set()          # controllers driving actual hardware
 
     @app.websocket("/ws/jog")
     async def ws_jog(ws: WebSocket):
@@ -357,12 +358,44 @@ def build_app(args) -> FastAPI:
                 cmd = json.loads(await ws.receive_text())
                 cmd["at"] = round(time.time(), 3)
                 jog_log.append(cmd)
+                # Fan out to whoever is driving hardware. Dead sockets are
+                # dropped here rather than retried: a jog command is only worth
+                # anything at the moment it is issued.
+                dead = []
+                for sub in jog_subs:
+                    try:
+                        await sub.send_json(cmd)
+                    except Exception:
+                        dead.append(sub)
+                for sub in dead:
+                    jog_subs.discard(sub)
+
                 # Echo the sequence number back: the glasses show acked vs sent,
                 # which is the only way to see a stalled link on a screen whose
-                # picture keeps updating regardless.
-                await ws.send_json({"ack": cmd.get("seq"), "n": len(jog_log)})
+                # picture keeps updating regardless. drivers is how the operator
+                # can tell "nothing is listening" from "the arm ignored me".
+                await ws.send_json({"ack": cmd.get("seq"), "n": len(jog_log),
+                                    "drivers": len(jog_subs)})
         except (WebSocketDisconnect, RuntimeError):
             pass
+
+    @app.websocket("/ws/jog/control")
+    async def ws_jog_control(ws: WebSocket):
+        """Subscribe to jog commands. This is the seam the arm plugs into.
+
+        Each message is {seq, mode, dir, axis}. Drive off `axis` -- "+X",
+        "-Y", "+Z", "GRIP+" and so on -- rather than `dir`, which is only which
+        way the operator swiped and means different things per mode.
+        """
+        await ws.accept()
+        jog_subs.add(ws)
+        try:
+            while True:
+                await ws.receive_text()      # keepalive; content ignored
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            jog_subs.discard(ws)
 
     @app.get("/api/jog/log")
     def jog_log_read(limit: int = 20):
