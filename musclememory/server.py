@@ -343,6 +343,31 @@ def build_app(args) -> FastAPI:
         except (WebSocketDisconnect, RuntimeError):
             pass
 
+    # ---------------- jog control ----------------
+    # Nothing is driven yet: this records and echoes so the glasses end can be
+    # built and verified before an arm exists, the same way the camera relay
+    # was. A real controller subscribes here and applies the deltas.
+    jog_log: deque = deque(maxlen=200)
+
+    @app.websocket("/ws/jog")
+    async def ws_jog(ws: WebSocket):
+        await ws.accept()
+        try:
+            while True:
+                cmd = json.loads(await ws.receive_text())
+                cmd["at"] = round(time.time(), 3)
+                jog_log.append(cmd)
+                # Echo the sequence number back: the glasses show acked vs sent,
+                # which is the only way to see a stalled link on a screen whose
+                # picture keeps updating regardless.
+                await ws.send_json({"ack": cmd.get("seq"), "n": len(jog_log)})
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    @app.get("/api/jog/log")
+    def jog_log_read(limit: int = 20):
+        return {"count": len(jog_log), "recent": list(jog_log)[-limit:]}
+
     # ---------------- live phone bridge ----------------
 
     async def _broadcast(msg: dict):

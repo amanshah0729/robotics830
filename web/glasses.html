@@ -104,6 +104,39 @@
            justify-content:center; padding:20px; text-align:center;
            color:var(--ink2); font-size:20px}
 
+  /* ---- teleop ---- */
+  /* Full-bleed feed with vector chrome over it. Everything here is bright ink
+     on black because black adds no light: the overlay reads even where the
+     photo underneath does not. */
+  #s-jog{padding:0; position:relative}
+  #jogwrap{position:absolute; inset:0; background:#000}
+  #jogoverlay{position:absolute; inset:0; pointer-events:none}
+  /* Opaque black plates, not text shadows. On an additive display a shadow
+     adds nothing -- black emits no light. A black plate instead occludes the
+     frame beneath it, so that patch goes transparent to the room and the
+     bright glyph on top has something to be brighter than. */
+  #jogmode{
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    padding:6px 16px; border-radius:10px; background:#000;
+    font:700 26px/1.2 inherit; letter-spacing:.12em; color:var(--accent);
+  }
+  #jogoverlay .ch{
+    position:absolute; font:700 20px/1.2 inherit; color:var(--ink);
+    padding:6px 12px; border-radius:9px; background:#000;
+    opacity:.75; transition:opacity 80ms linear, color 80ms linear;
+  }
+  #jogoverlay .ch.hot{opacity:1; color:var(--accent)}
+  #ch-up   {top:62px;   left:50%; transform:translateX(-50%)}
+  #ch-down {bottom:52px; left:50%; transform:translateX(-50%)}
+  #ch-left {left:14px;   top:50%; transform:translateY(-50%)}
+  #ch-right{right:14px;  top:50%; transform:translateY(-50%)}
+  #jogfoot{
+    position:absolute; bottom:12px; left:12px; right:12px;
+    display:flex; justify-content:space-between;
+    font:17px/1 inherit; color:var(--ink2);
+  }
+  #jogfoot span{background:#000; padding:5px 10px; border-radius:8px}
+
   /* ---- diagnostics ---- */
   #diag{font:17px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink2)}
   #diag .row{display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid #17242a; padding:5px 0}
@@ -121,8 +154,9 @@
      data. Swipe to move, pinch to select.</p>
   <button class="focusable" data-go="live"><span class="k">▶</span>Start motion search</button>
   <button class="focusable" data-go="feed"><span class="k">◉</span>Camera feed</button>
+  <button class="focusable" data-go="jog"><span class="k">✥</span>Teleop</button>
   <button class="focusable" data-go="diag"><span class="k">⚙</span>Diagnostics</button>
-  <footer><span>swipe ↑↓ · pinch = select · b142124</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
+  <footer><span>swipe ↑↓ · pinch = select · b143103</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
 </section>
 
 <!-- ============ LIVE ============ -->
@@ -143,6 +177,19 @@
     <div id="feedmsg">waiting for a frame…</div>
   </div>
   <footer><span id="feed-fps">0.0 fps</span><span id="feed-tally">req0 ok0 err0</span><span id="feed-age">—</span></footer>
+</section>
+
+<!-- ============ TELEOP ============ -->
+<section id="s-jog" class="screen">
+  <div id="jogwrap"></div>
+  <div id="jogoverlay">
+    <div id="jogmode">XY</div>
+    <div class="ch" id="ch-up"></div>
+    <div class="ch" id="ch-down"></div>
+    <div class="ch" id="ch-left"></div>
+    <div class="ch" id="ch-right"></div>
+    <div id="jogfoot"><span id="jogsent">0 sent</span><span id="jogack">0 ack</span></div>
+  </div>
 </section>
 
 <!-- ============ DIAGNOSTICS ============ -->
@@ -178,7 +225,8 @@ const KEY = { UP:"ArrowUp", DOWN:"ArrowDown", LEFT:"ArrowLeft", RIGHT:"ArrowRigh
               SELECT:"Enter", BACK:"Escape" };
 
 const $  = (id) => document.getElementById(id);
-const screens = { home:$("s-home"), live:$("s-live"), feed:$("s-feed"), diag:$("s-diag") };
+const screens = { home:$("s-home"), live:$("s-live"), feed:$("s-feed"),
+                  jog:$("s-jog"), diag:$("s-diag") };
 let current = "home";
 
 function show(name){
@@ -188,8 +236,16 @@ function show(name){
   if (first) first.focus();
   if (name === "diag") probeTick();
   if (name !== "feed") $("s-feed").classList.remove("fs");
-  if (name !== "feed" && feedWs){ feedWs.close(); feedWs = null; }
-  if (name === "feed"){ setFeedMode(feedMode); feedConnect(++feedLoop); }
+  if (!FEED_SCREENS.includes(name) && feedWs){ feedWs.close(); feedWs = null; }
+  if (FEED_SCREENS.includes(name)){
+    // One <img> serves both screens: reparent it instead of running a second
+    // socket and paying twice for the same frames.
+    const host = name === "jog" ? $("jogwrap") : $("feedwrap");
+    if ($("feed").parentNode !== host) host.appendChild($("feed"));
+    setFeedMode(feedMode);
+    feedConnect(++feedLoop);
+  }
+  if (name === "jog"){ jogConnect(); setJogMode(jogMode); }
 }
 
 function focusables(){
@@ -222,19 +278,25 @@ document.addEventListener("keydown", (e) => {
   $("d-key").textContent = keyLog.join(" ");
   switch (e.key){
     case KEY.LEFT:
-      if (current === "feed") setFeedMode(feedMode - 1); else moveFocus(-1);
+      if (current === "jog") jog("left");
+      else if (current === "feed") setFeedMode(feedMode - 1); else moveFocus(-1);
       break;
     case KEY.RIGHT:
-      if (current === "feed") setFeedMode(feedMode + 1); else moveFocus(+1);
+      if (current === "jog") jog("right");
+      else if (current === "feed") setFeedMode(feedMode + 1); else moveFocus(+1);
       break;
     case KEY.UP:
-      if (current === "feed") setCredits(feedCredits + 1); else moveFocus(-1);
+      if (current === "jog") jog("up");
+      else if (current === "feed") setCredits(feedCredits + 1); else moveFocus(-1);
       break;
     case KEY.DOWN:
-      if (current === "feed") setCredits(feedCredits - 1); else moveFocus(+1);
+      if (current === "jog") jog("down");
+      else if (current === "feed") setCredits(feedCredits - 1); else moveFocus(+1);
       break;
     case KEY.SELECT:
-      if (current === "feed"){
+      if (current === "jog"){
+        setJogMode(jogMode + 1);
+      } else if (current === "feed"){
         $("s-feed").classList.toggle("fs");
       } else if (document.activeElement &&
                  document.activeElement.classList.contains("focusable")){
@@ -370,8 +432,10 @@ let feedWired = false, feedLoop = 0, feedWs = null;
 let feedCredits = 2, feedInflight = 0;   // requests kept in flight       // loop token: re-entering must not stack timers
 
 // Left/right cycles how hard the frame is pushed for legibility on glass.
-// mono is usually the only one readable in a bright room.
-const FEED_MODES = ["mono", "boost", "raw"];
+// raw wins on the actual display -- the contrast-crushing modes were a
+// prediction from how additive waveguides behave, and testing disagreed.
+const FEED_SCREENS = ["feed", "jog"];
+const FEED_MODES = ["raw", "boost", "mono"];
 let feedMode = 0;
 
 function setCredits(n){
@@ -414,7 +478,7 @@ function feedPaint(url, isBlob){
    as they are produced. Polling stays as the fallback for when the socket
    cannot be established. */
 function feedConnect(token){
-  if (current !== "feed" || token !== feedLoop) return;
+  if (!FEED_SCREENS.includes(current) || token !== feedLoop) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(proto + "://" + location.host + "/ws/cam");
   ws.binaryType = "blob";
@@ -441,7 +505,7 @@ function feedConnect(token){
   };
   ws.onerror   = () => {};
   ws.onclose   = () => {
-    if (token !== feedLoop || current !== "feed") return;
+    if (token !== feedLoop || !FEED_SCREENS.includes(current)) return;
     // Fall back to polling; slow, but a visible feed beats a blank one.
     $("feed-src").textContent = FEED_MODES[feedMode] + " poll";
     feedTick(token);
@@ -449,7 +513,7 @@ function feedConnect(token){
 }
 
 function feedTick(token){
-  if (current !== "feed" || token !== feedLoop) return;
+  if (!FEED_SCREENS.includes(current) || token !== feedLoop) return;
   const img = $("feed");
 
   let settled = false;
@@ -488,6 +552,50 @@ setInterval(() => {
     (feedCount / ((now - feedTickAt) / 1000)).toFixed(1) + " fps";
   feedCount = 0; feedTickAt = now;
 }, 1000);
+
+/* ---------------------------------------------------------------------------
+   Teleop. Four directions and select is the entire input budget on this
+   device, so the axes have to be cycled rather than addressed directly: Enter
+   swaps which pair the arrows drive. That is not a workaround for the input
+   set -- it also happens to suit the link, since jog-and-confirm tolerates
+   latency that continuous servoing would not.
+--------------------------------------------------------------------------- */
+const JOG_MODES = [
+  { name: "XY",     up: "+X",   down: "-X",   left: "-Y",    right: "+Y"    },
+  { name: "Z/GRIP", up: "+Z",   down: "-Z",   left: "GRIP-", right: "GRIP+" },
+];
+let jogMode = 0, jogWs = null, jogSeq = 0, jogAck = 0;
+
+function setJogMode(i){
+  jogMode = (i + JOG_MODES.length) % JOG_MODES.length;
+  const m = JOG_MODES[jogMode];
+  $("jogmode").textContent = m.name;
+  $("ch-up").textContent    = "\u25B2 " + m.up;
+  $("ch-down").textContent  = "\u25BC " + m.down;
+  $("ch-left").textContent  = "\u25C0 " + m.left;
+  $("ch-right").textContent = m.right + " \u25B6";
+}
+
+function jogConnect(){
+  if (jogWs && jogWs.readyState <= 1) return;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  jogWs = new WebSocket(proto + "://" + location.host + "/ws/jog");
+  jogWs.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.ack != null){ jogAck = m.ack; $("jogack").textContent = jogAck + " ack"; }
+  };
+  jogWs.onclose = () => { if (current === "jog") setTimeout(jogConnect, 1000); };
+}
+
+function jog(dir){
+  const m = JOG_MODES[jogMode];
+  const el = $("ch-" + dir);
+  el.classList.add("hot");
+  setTimeout(() => el.classList.remove("hot"), 160);
+  if (!jogWs || jogWs.readyState !== 1) return;
+  jogWs.send(JSON.stringify({ seq: ++jogSeq, mode: m.name, dir, axis: m[dir] }));
+  $("jogsent").textContent = jogSeq + " sent";
+}
 
 $("d-vp").textContent = window.innerWidth + "x" + window.innerHeight;
 show("home");
