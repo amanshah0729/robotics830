@@ -136,6 +136,10 @@
     font:17px/1 inherit; color:var(--ink2);
   }
   #jogfoot span{background:#000; padding:5px 10px; border-radius:8px}
+  /* Nothing listening is the one failure the operator cannot see: swipes still
+     register, counters still climb, and the arm sits there. Call it out. */
+  #jogdrv.none{color:var(--bad)}
+  #jogdrv.ok{color:var(--good)}
 
   /* ---- diagnostics ---- */
   #diag{font:17px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink2)}
@@ -156,7 +160,7 @@
   <button class="focusable" data-go="feed"><span class="k">◉</span>Camera feed</button>
   <button class="focusable" data-go="jog"><span class="k">✥</span>Teleop</button>
   <button class="focusable" data-go="diag"><span class="k">⚙</span>Diagnostics</button>
-  <footer><span>swipe ↑↓ · pinch = select · b143103</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
+  <footer><span>swipe ↑↓ · pinch = select · b151202</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
 </section>
 
 <!-- ============ LIVE ============ -->
@@ -188,7 +192,7 @@
     <div class="ch" id="ch-down"></div>
     <div class="ch" id="ch-left"></div>
     <div class="ch" id="ch-right"></div>
-    <div id="jogfoot"><span id="jogsent">0 sent</span><span id="jogack">0 ack</span></div>
+    <div id="jogfoot"><span id="jogsent">0 sent</span><span id="jogdrv">no robot</span><span id="jogack">0 ack</span></div>
   </div>
 </section>
 
@@ -583,6 +587,13 @@ function jogConnect(){
   jogWs.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.ack != null){ jogAck = m.ack; $("jogack").textContent = jogAck + " ack"; }
+    if (m.drivers != null){
+      const el = $("jogdrv");
+      el.textContent = m.drivers > 0
+        ? m.drivers + " robot" + (m.drivers > 1 ? "s" : "")
+        : "NO ROBOT";
+      el.className = m.drivers > 0 ? "ok" : "none";
+    }
   };
   jogWs.onclose = () => { if (current === "jog") setTimeout(jogConnect, 1000); };
 }
