@@ -41,7 +41,9 @@
   <span id="kb">0 KB</span>
   <span id="sent">0 sent</span>
 </div>
-<label><input type="checkbox" id="rear" checked> rear camera</label>
+<label>camera
+  <select id="cam"><option value="">default (rear on phone)</option></select>
+</label>
 <label>size
   <select id="size">
     <option value="small">small 320x240</option>
@@ -90,6 +92,27 @@ let TARGET = PRESETS.medium;
 let QUALITY = 0.45;
 
 let timer = null, inflight = false, sent = 0, lastTick = performance.now(), frames = 0;
+let stream = null;
+
+// Device labels stay blank until camera permission has been granted once, so
+// the list is repopulated after the stream opens. facingMode is meaningless on
+// a laptop with several cameras -- pick by deviceId there, and fall back to
+// facingMode only when nothing specific was chosen (i.e. on a phone).
+async function listCameras(){
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices())
+                   .filter((d) => d.kind === "videoinput");
+    const sel = $("cam"), prev = sel.value || localStorage.getItem("camId") || "";
+    sel.innerHTML = '<option value="">default (rear on phone)</option>';
+    devs.forEach((d, i) => {
+      const o = document.createElement("option");
+      o.value = d.deviceId;
+      o.textContent = d.label || ("camera " + (i + 1));
+      sel.appendChild(o);
+    });
+    if (prev && devs.some((d) => d.deviceId === prev)) sel.value = prev;
+  } catch (err) { /* enumeration is best-effort */ }
+}
 
 function setState(text, ok){
   $("state").textContent = text;
@@ -148,23 +171,27 @@ $("start").disabled = false;
 $("size").addEventListener("change", (e) => { TARGET = PRESETS[e.target.value]; });
 $("q").addEventListener("change", (e) => { QUALITY = parseFloat(e.target.value); });
 
-$("start").addEventListener("click", async () => {
+async function startCamera(){
   try {
     $("start").disabled = true;
     $("start").textContent = "Starting…";
     setState("requesting camera", false);
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: $("rear").checked ? "environment" : "user",
-               width: { ideal: 960 } },
+    if (stream) stream.getTracks().forEach((t) => t.stop());   // release before reopening
+    const id = $("cam").value;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: id ? { deviceId: { exact: id }, width: { ideal: 960 } }
+                : { facingMode: "environment", width: { ideal: 960 } },
       audio: false,
     });
+    if (id) localStorage.setItem("camId", id);
     v.srcObject = stream;
     await v.play();
+    await listCameras();                    // labels are readable now
     $("start").textContent = "Streaming";
     $("status").textContent = "Streaming. Open /glasses on the Meta Ray-Ban " +
       "Display and pick Camera feed.";
     draw();
-    timer = setInterval(pushFrame, SEND_MS);
+    if (!timer) timer = setInterval(pushFrame, SEND_MS);
     setState("streaming", true);
   } catch (err) {
     $("start").disabled = false;
@@ -174,7 +201,12 @@ $("start").addEventListener("click", async () => {
       " — " + (err.message || "") + ". getUserMedia needs HTTPS and a browser " +
       "that allows it; Safari and Chrome both work, in-app browsers often do not.";
   }
-});
+}
+
+$("start").addEventListener("click", startCamera);
+// Switching camera mid-run should just work, without stopping the push loop.
+$("cam").addEventListener("change", () => { if (stream) startCamera(); });
+listCameras();
 </script>
 </body>
 </html>
