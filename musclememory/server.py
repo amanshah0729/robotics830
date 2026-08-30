@@ -434,6 +434,27 @@ def build_app(args) -> FastAPI:
         finally:
             jog_subs.discard(ws)
 
+    @app.get("/api/jog/next")
+    async def jog_next(after: int = 0, timeout: float = 25.0):
+        """Long-poll for the next jog command after sequence `after`.
+
+        The robot side runs inside the lerobot venv, so this deliberately needs
+        nothing but urllib there -- a websocket client would mean installing a
+        package on the machine holding the arm, minutes before a demo.
+
+        Returns {} on timeout so the caller just polls again; that keeps the
+        request short enough to survive any proxy idle limit.
+        """
+        deadline = time.time() + max(1.0, min(timeout, 55.0))
+        while time.time() < deadline:
+            for cmd in reversed(jog_log):
+                if cmd.get("seq", 0) > after:
+                    # Newest first: if several queued while the arm was moving,
+                    # the operator wants where they pointed last, not a replay.
+                    return cmd
+            await asyncio.sleep(0.02)
+        return {}
+
     @app.get("/api/jog/log")
     def jog_log_read(limit: int = 20):
         return {"count": len(jog_log), "recent": list(jog_log)[-limit:]}
