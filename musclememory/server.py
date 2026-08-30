@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -157,6 +157,27 @@ def build_app(args) -> FastAPI:
     @app.get("/phone")
     def phone():
         return FileResponse(WEB_DIR / "phone.html")
+
+    # FileResponse sends no Cache-Control, which lets a client heuristically
+    # cache the page off Last-Modified. The glasses WebView did exactly that
+    # and kept serving a stale build after a Restart, which is indistinguishable
+    # from the new code being broken.
+    NOCACHE = {"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"}
+
+    @app.get("/camera")
+    def camera():
+        """Capture source: runs in a normal phone browser, not on the glasses.
+        MRBD Web Apps have no camera, and the paired phone is a relay rather
+        than something the glasses page can reach — so frames have to make the
+        trip out to this server and back."""
+        return FileResponse(WEB_DIR / "camera.html", headers=NOCACHE)
+
+    @app.get("/glasses")
+    def glasses():
+        """Meta Ray-Ban Display client. Same /ws/phone motion contract, but the
+        IMU is head-mounted like the World Context capture rig, so queries hit
+        the bank without the wrist/pocket placement gap."""
+        return FileResponse(WEB_DIR / "glasses.html", headers=NOCACHE)
 
     @app.get("/api/meta")
     def meta():
@@ -299,6 +320,90 @@ def build_app(args) -> FastAPI:
         times, data = samples[:, 0], samples[:, 1:7]
         matches, space = S.motion_query(times, data, k=int(payload.get("k", 8)))
         return {"space": space, "matches": matches}
+
+    # ---------------- camera relay ----------------
+    # Deliberately last-frame-wins with no queue: a stalled consumer should see
+    # a fresh frame when it comes back, never work through a backlog of stale
+    # ones. Frames are small and disposable, so nothing is persisted.
+    cam = {"jpeg": None, "at": 0.0, "n": 0, "pulls": 0, "last_pull_ua": ""}
+
+    @app.post("/api/cam/push")
+    async def cam_push(request: Request):
+        body = await request.body()
+        if not body:
+            raise HTTPException(400, "empty frame")
+        cam["jpeg"], cam["at"], cam["n"] = body, time.time(), cam["n"] + 1
+        return {"ok": True, "n": cam["n"], "bytes": len(body)}
+
+    @app.get("/api/cam/latest")
+    def cam_latest(request: Request):
+        # Counted so a consumer that never asks can be told apart from one that
+        # asks and fails to render -- the two look identical on the glasses.
+        cam["pulls"] += 1
+        cam["last_pull_ua"] = request.headers.get("user-agent", "")[:120]
+        if cam["jpeg"] is None:
+            raise HTTPException(404, "no frame pushed yet")
+        return Response(cam["jpeg"], media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/cam/status")
+    def cam_status():
+        return {"frames": cam["n"],
+                "age_s": round(time.time() - cam["at"], 2) if cam["n"] else None,
+                "bytes": len(cam["jpeg"]) if cam["jpeg"] else 0,
+                "pulls": cam["pulls"], "last_pull_ua": cam["last_pull_ua"]}
+
+    @app.websocket("/ws/cam")
+    async def ws_cam(ws: WebSocket):
+        """Newest-frame-on-demand over one long-lived socket.
+
+        Free-running push looked right and was not: send_bytes hands the frame
+        to the transport rather than waiting for the wire, so a server
+        producing 8 fps into a client draining 5 fps queues the difference
+        forever. The picture stays smooth and drifts further behind reality
+        every second -- about ten seconds of lag inside a minute.
+
+        So the client asks for each frame and gets whatever is newest when the
+        request lands. One frame in flight, everything that accumulated in the
+        meantime skipped. A slow link costs frame rate, never freshness, which
+        is the correct trade for a view someone is steering by.
+        """
+        await ws.accept()
+        last_sent = -1
+        try:
+            while True:
+                await ws.receive_text()          # any message means "next frame"
+                while cam["jpeg"] is None or cam["n"] == last_sent:
+                    await asyncio.sleep(0.015)   # nothing new yet; hold the request
+                last_sent = cam["n"]
+                await ws.send_bytes(cam["jpeg"])
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    # ---------------- jog control ----------------
+    # Nothing is driven yet: this records and echoes so the glasses end can be
+    # built and verified before an arm exists, the same way the camera relay
+    # was. A real controller subscribes here and applies the deltas.
+    jog_log: deque = deque(maxlen=200)
+
+    @app.websocket("/ws/jog")
+    async def ws_jog(ws: WebSocket):
+        await ws.accept()
+        try:
+            while True:
+                cmd = json.loads(await ws.receive_text())
+                cmd["at"] = round(time.time(), 3)
+                jog_log.append(cmd)
+                # Echo the sequence number back: the glasses show acked vs sent,
+                # which is the only way to see a stalled link on a screen whose
+                # picture keeps updating regardless.
+                await ws.send_json({"ack": cmd.get("seq"), "n": len(jog_log)})
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    @app.get("/api/jog/log")
+    def jog_log_read(limit: int = 20):
+        return {"count": len(jog_log), "recent": list(jog_log)[-limit:]}
 
     # ---------------- live phone bridge ----------------
 
