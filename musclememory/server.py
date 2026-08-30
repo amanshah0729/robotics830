@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import io
 import json
 import time
@@ -226,6 +227,30 @@ def build_app(args) -> FastAPI:
         q = S.bank_v[row] / (np.linalg.norm(S.bank_v[row]) + 1e-9)
         results = [r for r in S.topk(S.bank_v, q, k + 4) if r["row"] != row][:k]
         return {"results": results}
+
+    @app.post("/api/search/image")
+    async def search_image(payload: dict):
+        """Visual query: one base64 frame (camera, screen capture of a glasses
+        video call, phone) -> CLIP image tower -> nearest video moments."""
+        b64 = payload.get("image", "")
+        if "," in b64[:64]:  # strip data-URL prefix
+            b64 = b64.split(",", 1)[1]
+        try:
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+        except Exception:
+            raise HTTPException(400, "image must be base64 JPEG/PNG (data URL ok)")
+        arr = np.asarray(img)
+        k = int(payload.get("k", 12))
+        loop = asyncio.get_event_loop()
+
+        def run():
+            vec = S.get_embedder().encode_images([arr])[0]
+            return S.topk(S.bank_v, vec.astype(np.float32), k)
+
+        return {"stub": S.embedder_kind != "clip",
+                "results": await loop.run_in_executor(None, run)}
 
     @app.post("/api/search/motion")
     async def search_motion(payload: dict):

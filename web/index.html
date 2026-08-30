@@ -11,9 +11,15 @@
 <header id="topbar">
   <div id="brand">MUSCLE&nbsp;MEMORY<span id="meta-stats"></span></div>
   <input id="search" type="search" placeholder="search by text — e.g. “pouring liquid”" autocomplete="off">
+  <button id="mic" title="voice search (works with a Bluetooth glasses mic)" hidden>
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+      <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/>
+    </svg>
+  </button>
   <nav id="tabs">
     <button class="tab active" data-tab="atlas">Atlas</button>
     <button class="tab" data-tab="live">Live motion</button>
+    <button class="tab" data-tab="vision">Live vision</button>
   </nav>
   <span id="space-badge" title="which space answers motion queries"></span>
 </header>
@@ -57,6 +63,27 @@
     <div id="live-status">waiting for a phone…</div>
   </div>
   <div id="live-matches"></div>
+</main>
+
+<main id="view-vision" hidden>
+  <div id="vision-left">
+    <h2>Live vision search</h2>
+    <p>Point a camera at work — or screen-capture a video call streamed from
+       smart glasses — and the current view retrieves matching moments every
+       second, by sight alone.</p>
+    <p class="fineprint">Ray-Ban glasses: start a WhatsApp/Messenger video call
+       from the glasses, answer it on this machine, then pick that call window
+       with “capture a window”. Voice: pair the glasses as this device's
+       Bluetooth mic and use the 🎙 button above.</p>
+    <div id="vision-src">
+      <button class="v-btn" id="v-cam">Use camera</button>
+      <button class="v-btn" id="v-screen">Capture a window</button>
+      <button class="v-btn" id="v-stop" hidden>Stop</button>
+    </div>
+    <video id="v-preview" autoplay muted playsinline hidden></video>
+    <div id="vision-status">no source yet</div>
+  </div>
+  <div id="vision-matches"></div>
 </main>
 
 <script src="/static/app.js"></script>

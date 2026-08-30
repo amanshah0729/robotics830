@@ -254,13 +254,51 @@ $("d-similar").addEventListener("click", async () => {
 
 /* ---------------- text search ---------------- */
 
-$("search").addEventListener("keydown", async (e) => {
-  if (e.key !== "Enter") return;
-  const q = e.target.value.trim();
-  if (!q) return;
+async function runTextSearch(q) {
   const res = await (await fetch(`/api/search/text?q=${encodeURIComponent(q)}`)).json();
   renderResults(`“${q}”`, res.results, res.stub);
+}
+
+$("search").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const q = e.target.value.trim();
+  if (q) runTextSearch(q);
 });
+
+/* ---- voice search: browser speech recognition; with smart glasses paired as
+   the Bluetooth mic, this is literally "ask your glasses" ---- */
+const SEARCH_PLACEHOLDER = $("search").placeholder;
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SR) {
+  const mic = $("mic");
+  mic.hidden = false;
+  let rec = null;
+  mic.addEventListener("click", () => {
+    if (rec) { rec.stop(); return; }
+    rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    mic.classList.add("listening");
+    $("search").value = "";
+    $("search").placeholder = "listening…";
+    rec.addEventListener("result", (e) => {
+      const txt = Array.from(e.results).map((r) => r[0].transcript).join(" ").trim();
+      $("search").value = txt;
+      if (txt && e.results[e.results.length - 1].isFinal) runTextSearch(txt);
+    });
+    rec.addEventListener("error", (e) => {
+      $("search").placeholder = `voice error: ${e.error}`;
+      setTimeout(() => { $("search").placeholder = SEARCH_PLACEHOLDER; }, 2500);
+    });
+    rec.addEventListener("end", () => {
+      rec = null;
+      mic.classList.remove("listening");
+      if ($("search").placeholder === "listening…")
+        $("search").placeholder = SEARCH_PLACEHOLDER;
+    });
+    rec.start();
+  });
+}
 
 function renderResults(title, results, stub) {
   showPanel("results");
@@ -290,11 +328,25 @@ function renderResults(title, results, stub) {
 const tabs = document.querySelectorAll(".tab");
 tabs.forEach((t) => t.addEventListener("click", () => {
   tabs.forEach((x) => x.classList.toggle("active", x === t));
-  const live = t.dataset.tab === "live";
-  $("view-atlas").hidden = live;
-  $("view-live").hidden = !live;
-  if (!live) { resize(); draw(); }
+  const which = t.dataset.tab;
+  $("view-atlas").hidden = which !== "atlas";
+  $("view-live").hidden = which !== "live";
+  $("view-vision").hidden = which !== "vision";
+  if (which === "atlas") { resize(); draw(); }
 }));
+
+function matchCard(m) {
+  const card = document.createElement("div");
+  card.className = "m-card";
+  const img = document.createElement("img");
+  img.src = `/api/frame?row=${m.row}&w=320`; img.alt = "";
+  const body = document.createElement("div"); body.className = "m-body";
+  const a = document.createElement("div"); a.className = "r-task"; a.textContent = pretty(m.task);
+  const b = document.createElement("div"); b.className = "m-score";
+  b.textContent = `${m.clip} · ${m.t}s · ${m.score.toFixed(3)}`;
+  body.append(a, b); card.append(img, body);
+  return card;
+}
 
 function connectLive() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -308,18 +360,7 @@ function connectLive() {
       drawEnergy(msg.energy);
       const grid = $("live-matches");
       grid.innerHTML = "";
-      for (const m of msg.matches) {
-        const card = document.createElement("div");
-        card.className = "m-card";
-        const img = document.createElement("img");
-        img.src = `/api/frame?row=${m.row}&w=320`; img.alt = "";
-        const body = document.createElement("div"); body.className = "m-body";
-        const a = document.createElement("div"); a.className = "r-task"; a.textContent = pretty(m.task);
-        const b = document.createElement("div"); b.className = "m-score";
-        b.textContent = `${m.clip} · ${m.t}s · ${m.score.toFixed(3)}`;
-        body.append(a, b); card.append(img, body);
-        grid.appendChild(card);
-      }
+      for (const m of msg.matches) grid.appendChild(matchCard(m));
     }
   });
   ws.addEventListener("close", () => setTimeout(connectLive, 2000));
@@ -337,6 +378,71 @@ function drawEnergy(v) {
   g.fillStyle = "#3987e5";
   g.fillRect(0, 4, Math.min(1, v / 8) * W, H - 8);
 }
+
+/* ---------------- live vision search ----------------
+   Sources: device camera, or a screen-captured window — e.g. a WhatsApp video
+   call streamed from Ray-Ban smart glasses, answered on this machine. Every
+   ~1.2s the current frame goes to /api/search/image (CLIP image tower). */
+
+let vStream = null, vTimer = null, vBusy = false;
+
+async function visionStart(kind) {
+  visionStop();
+  try {
+    vStream = kind === "cam"
+      ? await navigator.mediaDevices.getUserMedia({ video: { width: 960 }, audio: false })
+      : await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+  } catch (e) {
+    $("vision-status").textContent = `could not open source: ${e.message}`;
+    return;
+  }
+  const v = $("v-preview");
+  v.srcObject = vStream;
+  v.hidden = false;
+  $("v-stop").hidden = false;
+  $("vision-status").textContent = "searching by sight…";
+  vStream.getVideoTracks()[0].addEventListener("ended", visionStop);
+  vTimer = setInterval(visionTick, 1200);
+}
+
+async function visionTick() {
+  const v = $("v-preview");
+  if (vBusy || !vStream || !v.videoWidth) return;
+  vBusy = true;
+  try {
+    const c = document.createElement("canvas");
+    const w = 480, h = Math.max(2, Math.round((v.videoHeight * w) / v.videoWidth));
+    c.width = w; c.height = h;
+    c.getContext("2d").drawImage(v, 0, 0, w, h);
+    const res = await (await fetch("/api/search/image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: c.toDataURL("image/jpeg", 0.7), k: 9 }),
+    })).json();
+    const grid = $("vision-matches");
+    grid.innerHTML = res.stub
+      ? `<div class="stub-note">fixture vision search is a placeholder — real semantics need --embedder clip</div>`
+      : "";
+    for (const m of res.results || []) grid.appendChild(matchCard(m));
+  } catch (e) {
+    $("vision-status").textContent = `search error: ${e.message}`;
+  } finally {
+    vBusy = false;
+  }
+}
+
+function visionStop() {
+  if (vTimer) { clearInterval(vTimer); vTimer = null; }
+  if (vStream) { vStream.getTracks().forEach((t) => t.stop()); vStream = null; }
+  const v = $("v-preview");
+  v.srcObject = null; v.hidden = true;
+  $("v-stop").hidden = true;
+  $("vision-status").textContent = "no source yet";
+}
+
+$("v-cam").addEventListener("click", () => visionStart("cam"));
+$("v-screen").addEventListener("click", () => visionStart("screen"));
+$("v-stop").addEventListener("click", visionStop);
 
 const pretty = (s) => String(s).replace(/[_-]+/g, " ");
 
