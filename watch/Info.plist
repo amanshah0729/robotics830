@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>WKApplication</key>
+	<true/>
+	<key>NSMotionUsageDescription</key>
+	<string>Streams wrist motion to the Muscle Memory demo server to search the dataset by movement alone.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connects to the Muscle Memory server running on your laptop over the local network.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
