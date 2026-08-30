@@ -186,7 +186,12 @@ const GLYPH = { ArrowUp:"\u2191", ArrowDown:"\u2193", ArrowLeft:"\u2190",
 const keyLog = [];
 
 document.addEventListener("keydown", (e) => {
-  keyLog.unshift(GLYPH[e.key] || e.key);
+  // The glasses runtime fires a second event after every gesture, measured on
+  // device as key "Unidentified" with no code and keyCode 0 — identical every
+  // time, so it distinguishes nothing and is dropped. The usable input set is
+  // exactly four directions, select, and back.
+  if (!(e.key in GLYPH)) return;
+  keyLog.unshift(GLYPH[e.key]);
   keyLog.length = Math.min(keyLog.length, 8);
   $("d-key").textContent = keyLog.join(" ");
   switch (e.key){
