@@ -27,6 +27,7 @@ Run:
 import argparse
 import contextlib
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -45,6 +46,8 @@ from lerobot.robots.so_follower.robot_kinematic_processor import InverseKinemati
 from lerobot.utils.rotation import Rotation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+from musclememory.glasses_jog import GlassesJog  # noqa: E402
 DEFAULT_URDF = REPO_ROOT / "SO-ARM100" / "Simulation" / "SO101" / "so101_new_calib.urdf"
 
 # ----- KEYMAP (macOS ANSI virtual keycodes: letters tracked by keycode so
@@ -73,6 +76,17 @@ JOINT_AXES = [
     ("wrist_flex", YAW_LEFT, YAW_RIGHT),
     ("wrist_roll", ROLL_CCW, ROLL_CW),
 ]
+# Meta Ray-Ban Display sends four directions across two modes -- exactly the
+# four degrees of freedom claw mode consumes. Orientation is left out on
+# purpose: at --orient-weight 0.1 the IK is effectively position-only, so it
+# picks better wrist angles than an operator could at 4 fps over a relay.
+GLASSES_AXES = {
+    "+X": FWD,  "-X": BACK,
+    "+Y": RIGHT, "-Y": LEFT,
+    "+Z": UP,   "-Z": DOWN,
+    "GRIP+": GRIP_OPEN, "GRIP-": GRIP_CLOSE,
+}
+
 HOME_POSE = {  # calibrated middle pose: 0 deg on every joint, claw half-open
     "shoulder_pan": 0.0,
     "shoulder_lift": 0.0,
@@ -154,6 +168,11 @@ def main() -> None:
     parser.add_argument("--gripper-step", type=float, default=2.0, help="Gripper units per tick")
     parser.add_argument("--leash", type=float, default=15.0, help="Max degrees a joint target may lead the real joint")
     parser.add_argument("--ee-leash", type=float, default=0.06, help="Max metres the claw target may lead the real claw")
+    parser.add_argument("--glasses", default=None,
+                        help="Muscle Memory server URL to take Ray-Ban Display jogs from, "
+                             "e.g. https://<name>.trycloudflare.com")
+    parser.add_argument("--glasses-hold", type=float, default=0.25,
+                        help="Seconds a glasses swipe holds its key (one swipe = one nudge)")
     args = parser.parse_args()
 
     if not Path(args.urdf).exists():
@@ -192,6 +211,17 @@ def main() -> None:
     )
 
     keys = Keys()
+
+    # Glasses jogs land in the same pressed-key set the listener writes to, so
+    # they travel the existing code path: speed scaling, leashing, IK and mode
+    # all apply, and the keyboard keeps working alongside as a manual override
+    # -- worth having when the demo depends on a tunnel staying up.
+    glasses = None
+    if args.glasses:
+        glasses = GlassesJog(args.glasses, GLASSES_AXES, keys.pressed,
+                             hold_s=args.glasses_hold,
+                             on_event=lambda m: print(f"  [glasses] {m}", flush=True)).start()
+        print(f"Taking Ray-Ban Display jogs from {args.glasses}")
     robot.connect()
     print(__doc__)
     mode = args.mode
@@ -323,6 +353,8 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        if glasses is not None:
+            glasses.stop()
         keys.close()
         robot.disconnect()
         print("Disconnected cleanly.")

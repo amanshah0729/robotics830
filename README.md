@@ -87,6 +87,30 @@ the arm (rhythm and shape, not learned manipulation — say so on stage):
 <lerobot-venv>/bin/python -m musclememory.perform --port <PORT> --robot-id <ID>   # --dry-run to preview
 ```
 
+### When it doesn't work
+
+`GET /api/health` reports every hop at once, so a failure can be located
+instead of guessed at:
+
+```bash
+curl -s <tunnel>/api/health | python3 -m json.tool
+```
+
+| Symptom | Look at | Means |
+| --- | --- | --- |
+| Glasses feed blank | `camera.frames_pushed` = 0 | phone isn't pushing; reload `/camera` and press Start |
+| Feed frozen | `camera.last_frame_age_s` large | phone stopped capturing — iOS suspends it when the screen sleeps |
+| Feed blank, frames arriving | `camera.pulls_by_viewer` climbing | glasses are asking and not painting; check the feed footer's `req/ok/err` |
+| Swipes do nothing | `jog.drivers` = 0 | nothing is driving the arm; the teleop screen says **NO ROBOT** in red |
+| Arm moves wrong way | `jog.last.axis` | command is arriving; flip that pair in `GLASSES_AXES` |
+| Swipes register, arm still | — | his loop is paused (P), or `--glasses-hold` is too short to register a tick |
+
+On the glasses themselves: **Diagnostics** covers the passive layers (websocket,
+IMU permission and rate, gesture log, image refresh), the **Feed** footer shows
+`fps`, `req/ok/err` and `ws`/`poll`, and **Teleop** shows sent, acked, and
+whether any robot is listening. Between them, every hop reports its own state
+without a laptop.
+
 ## With the World Context flash drive
 
 ```bash

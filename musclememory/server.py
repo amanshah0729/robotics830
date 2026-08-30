@@ -385,7 +385,16 @@ def build_app(args) -> FastAPI:
     # built and verified before an arm exists, the same way the camera relay
     # was. A real controller subscribes here and applies the deltas.
     jog_log: deque = deque(maxlen=200)
-    jog_subs: set = set()          # controllers driving actual hardware
+    jog_subs: set = set()          # websocket controllers
+    # Long-poll callers have no persistent connection to count, so liveness is
+    # inferred from recency. The robot side polls with a 20s timeout, so a gap
+    # beyond ~45s means it is genuinely gone rather than mid-request.
+    jog_poll = {"at": 0.0, "who": ""}
+    DRIVER_STALE_S = 45.0
+
+    def driver_count() -> int:
+        recent = (time.time() - jog_poll["at"]) < DRIVER_STALE_S
+        return len(jog_subs) + (1 if recent else 0)
 
     @app.websocket("/ws/jog")
     async def ws_jog(ws: WebSocket):
@@ -412,7 +421,7 @@ def build_app(args) -> FastAPI:
                 # picture keeps updating regardless. drivers is how the operator
                 # can tell "nothing is listening" from "the arm ignored me".
                 await ws.send_json({"ack": cmd.get("seq"), "n": len(jog_log),
-                                    "drivers": len(jog_subs)})
+                                    "drivers": driver_count()})
         except (WebSocketDisconnect, RuntimeError):
             pass
 
@@ -433,6 +442,55 @@ def build_app(args) -> FastAPI:
             pass
         finally:
             jog_subs.discard(ws)
+
+    @app.get("/api/jog/next")
+    async def jog_next(request: Request, after: int = 0, timeout: float = 25.0):
+        """Long-poll for the next jog command after sequence `after`.
+
+        The robot side runs inside the lerobot venv, so this deliberately needs
+        nothing but urllib there -- a websocket client would mean installing a
+        package on the machine holding the arm, minutes before a demo.
+
+        Returns {} on timeout so the caller just polls again; that keeps the
+        request short enough to survive any proxy idle limit.
+        """
+        jog_poll["at"] = time.time()
+        jog_poll["who"] = (request.client.host if request.client else "?")
+        deadline = time.time() + max(1.0, min(timeout, 55.0))
+        while time.time() < deadline:
+            for cmd in reversed(jog_log):
+                if cmd.get("seq", 0) > after:
+                    # Newest first: if several queued while the arm was moving,
+                    # the operator wants where they pointed last, not a replay.
+                    return cmd
+            await asyncio.sleep(0.02)
+        return {}
+
+    @app.get("/api/health")
+    def health():
+        """Every hop in one response, so a failure can be located without
+        guessing which of five moving parts is at fault."""
+        now = time.time()
+        return {
+            "camera": {
+                "frames_pushed": cam["n"],
+                "last_frame_age_s": round(now - cam["at"], 2) if cam["n"] else None,
+                "frame_bytes": len(cam["jpeg"]) if cam["jpeg"] else 0,
+                "pulls_by_viewer": cam["pulls"],
+                "viewer": cam["last_pull_ua"][:60],
+                "ok": cam["n"] > 0 and (now - cam["at"]) < 5,
+            },
+            "jog": {
+                "commands": len(jog_log),
+                "last": jog_log[-1] if jog_log else None,
+                "ws_drivers": len(jog_subs),
+                "polling_driver": round(now - jog_poll["at"], 1)
+                                  if jog_poll["at"] else None,
+                "polling_from": jog_poll["who"],
+                "drivers": driver_count(),
+                "ok": driver_count() > 0,
+            },
+        }
 
     @app.get("/api/jog/log")
     def jog_log_read(limit: int = 20):
