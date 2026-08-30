@@ -75,6 +75,26 @@ class State:
             print("[server] no IMU model yet -> motion search uses the "
                   "handcrafted-feature baseline space")
         self.live: set[WebSocket] = set()
+        self.text_bank = None   # lazy: CLIP text embeddings of task names
+        self.text_labels: list[str] | None = None
+
+    def word_scores(self, q_emb: np.ndarray, k: int = 3) -> list[dict]:
+        """Zero-shot motion->words: learned IMU embedding lives in CLIP space,
+        so compare it against CLIP text embeddings of the task vocabulary."""
+        if self.query_encoder is None or self.embedder_kind != "clip":
+            return []
+        if self.text_bank is None:
+            emb = self.get_embedder()
+            self.text_labels = [t.replace("_", " ").replace("-", " ")
+                                for t in self.tasks]
+            self.text_bank = np.stack(
+                [emb.encode_text(f"a photo of a person doing {l}")
+                 for l in self.text_labels]).astype(np.float32)
+            print(f"[server] motion->words vocabulary: {len(self.text_labels)} phrases")
+        sims = self.text_bank @ q_emb
+        top = np.argsort(-sims)[:k]
+        return [{"word": self.text_labels[i], "score": round(float(sims[i]), 4)}
+                for i in top]
 
     def get_embedder(self):
         if self.embedder is None:
@@ -309,9 +329,15 @@ def build_app(args) -> FastAPI:
                 loop = asyncio.get_event_loop()
                 matches, space = await loop.run_in_executor(
                     None, S.motion_query, times, data)
+                words = []
+                if S.query_encoder is not None:
+                    q_emb = await loop.run_in_executor(
+                        None, S.query_encoder.encode, times, data)
+                    words = await loop.run_in_executor(None, S.word_scores, q_emb)
                 energy = float(np.linalg.norm(data[:, :3], axis=1).std())
                 out = {"type": "matches", "space": space,
-                       "energy": round(energy, 3), "matches": matches}
+                       "energy": round(energy, 3), "matches": matches,
+                       "words": words}
                 await ws.send_json(out)
                 await _broadcast(out)
         except WebSocketDisconnect:

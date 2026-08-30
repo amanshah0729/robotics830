@@ -28,8 +28,9 @@
 **Motion alone retrieves what a person was doing.** An IMU encoder trained at the event on World Context places inertial windows in CLIP space: held-out motion retrieves its own video moment far above chance and groups by task above a handcrafted-feature baseline — including live motion from a phone the model never saw.
 
 **Evidence (from `work/eval.json`, 39 held-out clips = 5,793 query windows, full 62,974-window pool, same-clip neighbors excluded):**
-- IMU→video retrieval: R@1 = 0.14%, R@5 = 0.55%, R@10 = 1.24% (random R@10 = 0.016% — **~78× chance**), median rank 978 of 62,974 (top 1.6%)
-- Task-consistency@5: learned **0.480** vs. handcrafted baseline 0.184 (chance 0.020) — **2.6× the baseline, 24× chance**
+- IMU→video retrieval: R@1 = 0.09%, R@5 = 0.59%, R@10 = 1.29% (random R@10 = 0.016% — **~81× chance**), median rank 1,135 of 62,974 (top 1.8%)
+- Task-consistency@5: learned **0.461** vs. handcrafted baseline 0.184 (chance 0.020) — **2.5× the baseline, 23× chance**
+- Note: 100-epoch training overfit (val R@10 fell); the shipped encoder is the 15-epoch checkpoint. Run-to-run variance ≈ ±0.02 on task-consistency.
 
 ## Limitations, failures, unfinished work
 

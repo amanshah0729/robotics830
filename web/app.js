@@ -19,6 +19,7 @@ const S = {
 
 const $ = (id) => document.getElementById(id);
 const map = $("map"), ctx = map.getContext("2d");
+const cometCv = $("comet"), cometCtx = cometCv.getContext("2d");
 
 async function boot() {
   S.meta = await (await fetch("/api/meta")).json();
@@ -48,6 +49,8 @@ function resize() {
   const dpr = window.devicePixelRatio || 1;
   map.width = r.width * dpr; map.height = r.height * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cometCv.width = r.width * dpr; cometCv.height = r.height * dpr;
+  cometCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
 function fitView() {
@@ -348,6 +351,81 @@ function matchCard(m) {
   return card;
 }
 
+/* ---------------- the comet: live motion's position on the atlas ----------
+   The query's location = score-weighted centroid of its matched moments'
+   atlas positions (all in data space, so pan/zoom keeps it anchored). */
+
+const comet = { x: 0, y: 0, tx: 0, ty: 0, trail: [], lastMsg: 0, raf: 0 };
+
+function cometUpdate(matches) {
+  let wx = 0, wy = 0, ws = 0;
+  for (const m of matches) {
+    const p = S.rowPos.get(m.row);
+    if (!p) continue;
+    const w = Math.max(0.01, m.score);
+    wx += p[0] * w; wy += p[1] * w; ws += w;
+  }
+  if (!ws) return;
+  comet.tx = wx / ws; comet.ty = wy / ws;
+  if (!comet.lastMsg) { comet.x = comet.tx; comet.y = comet.ty; }
+  comet.lastMsg = performance.now();
+  if (!comet.raf) cometFrame();
+}
+
+function cometFrame() {
+  const age = performance.now() - comet.lastMsg;
+  const r = map.parentElement.getBoundingClientRect();
+  cometCtx.clearRect(0, 0, r.width, r.height);
+  if (age > 6000) {          // stream went quiet — fade out and stop
+    comet.raf = 0; comet.trail = []; comet.lastMsg = 0;
+    return;
+  }
+  comet.x += (comet.tx - comet.x) * 0.06;
+  comet.y += (comet.ty - comet.y) * 0.06;
+  comet.trail.push([comet.x, comet.y]);
+  if (comet.trail.length > 90) comet.trail.shift();
+
+  for (let i = 1; i < comet.trail.length; i++) {
+    const [sx0, sy0] = toScreen(comet.trail[i - 1][0], comet.trail[i - 1][1]);
+    const [sx1, sy1] = toScreen(comet.trail[i][0], comet.trail[i][1]);
+    cometCtx.strokeStyle = "#3987e5";
+    cometCtx.globalAlpha = (i / comet.trail.length) * 0.6;
+    cometCtx.lineWidth = 2;
+    cometCtx.beginPath(); cometCtx.moveTo(sx0, sy0); cometCtx.lineTo(sx1, sy1);
+    cometCtx.stroke();
+  }
+  cometCtx.globalAlpha = 1;
+  const [sx, sy] = toScreen(comet.x, comet.y);
+  const pulse = 6 + Math.sin(performance.now() / 180) * 1.5;
+  cometCtx.fillStyle = "#3987e5";
+  cometCtx.shadowColor = "#3987e5"; cometCtx.shadowBlur = 14;
+  cometCtx.beginPath(); cometCtx.arc(sx, sy, pulse, 0, 7); cometCtx.fill();
+  cometCtx.shadowBlur = 0;
+  cometCtx.strokeStyle = "#ffffff"; cometCtx.lineWidth = 1.5;
+  cometCtx.beginPath(); cometCtx.arc(sx, sy, pulse + 3, 0, 7); cometCtx.stroke();
+  comet.raf = requestAnimationFrame(cometFrame);
+}
+
+function renderWords(words) {
+  const el = $("live-words");
+  $("words-label").hidden = !words || !words.length;
+  if (!words || !words.length) { el.innerHTML = ""; return; }
+  el.innerHTML = "";
+  const top = document.createElement("div");
+  top.className = "w-top";
+  top.textContent = words[0].word;
+  const sc = document.createElement("span");
+  sc.className = "w-score"; sc.textContent = words[0].score.toFixed(2);
+  top.appendChild(sc);
+  el.appendChild(top);
+  if (words.length > 1) {
+    const alt = document.createElement("div");
+    alt.className = "w-alt";
+    alt.textContent = words.slice(1).map((w) => `${w.word} ${w.score.toFixed(2)}`).join(" · ");
+    el.appendChild(alt);
+  }
+}
+
 function connectLive() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
@@ -358,6 +436,8 @@ function connectLive() {
     if (msg.type === "matches") {
       $("live-status").textContent = `matching in ${msg.space} space`;
       drawEnergy(msg.energy);
+      renderWords(msg.words);
+      cometUpdate(msg.matches);
       const grid = $("live-matches");
       grid.innerHTML = "";
       for (const m of msg.matches) grid.appendChild(matchCard(m));

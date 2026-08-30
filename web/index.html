@@ -27,6 +27,7 @@
 <main id="view-atlas">
   <div id="map-wrap">
     <canvas id="map"></canvas>
+    <canvas id="comet"></canvas>
     <div id="legend" class="floating"></div>
     <div id="tooltip" hidden></div>
     <div id="hint" class="floating">scroll = zoom · drag = pan · click = inspect · esc = clear</div>
@@ -61,6 +62,8 @@
     <div class="s-label">phone motion energy</div>
     <canvas id="energy" height="26"></canvas>
     <div id="live-status">waiting for a phone…</div>
+    <div class="s-label" id="words-label" hidden>the motion reads as</div>
+    <div id="live-words"></div>
   </div>
   <div id="live-matches"></div>
 </main>
