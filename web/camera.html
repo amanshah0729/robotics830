@@ -78,7 +78,7 @@
 const $ = (id) => document.getElementById(id);
 const v = $("v"), c = $("c"), ctx = c.getContext("2d");
 
-const SEND_MS = 150;      // ~6.7 fps ceiling; the glasses poll slower than this
+const SEND_MS = 100;      // ~10 fps ceiling, so the phone is not the limit
 
 // The glasses render into a 600x600 box, so a tall portrait frame spends most
 // of its bytes on letterbox bars that get thrown away. Centre-crop to 4:3 and

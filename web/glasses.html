@@ -122,7 +122,7 @@
   <button class="focusable" data-go="live"><span class="k">▶</span>Start motion search</button>
   <button class="focusable" data-go="feed"><span class="k">◉</span>Camera feed</button>
   <button class="focusable" data-go="diag"><span class="k">⚙</span>Diagnostics</button>
-  <footer><span>swipe ↑↓ · pinch = select · b141659</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
+  <footer><span>swipe ↑↓ · pinch = select · b142124</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
 </section>
 
 <!-- ============ LIVE ============ -->
@@ -221,11 +221,17 @@ document.addEventListener("keydown", (e) => {
   keyLog.length = Math.min(keyLog.length, 8);
   $("d-key").textContent = keyLog.join(" ");
   switch (e.key){
-    case KEY.UP: case KEY.LEFT:
+    case KEY.LEFT:
       if (current === "feed") setFeedMode(feedMode - 1); else moveFocus(-1);
       break;
-    case KEY.DOWN: case KEY.RIGHT:
+    case KEY.RIGHT:
       if (current === "feed") setFeedMode(feedMode + 1); else moveFocus(+1);
+      break;
+    case KEY.UP:
+      if (current === "feed") setCredits(feedCredits + 1); else moveFocus(-1);
+      break;
+    case KEY.DOWN:
+      if (current === "feed") setCredits(feedCredits - 1); else moveFocus(+1);
       break;
     case KEY.SELECT:
       if (current === "feed"){
@@ -360,12 +366,22 @@ let feedShown = 0, feedTickAt = performance.now(), feedCount = 0;
 let feedReq = 0, feedErr = 0;
 const feedTally = () => $("feed-tally").textContent =
   "req" + feedReq + " ok" + feedShown + " err" + feedErr;
-let feedWired = false, feedLoop = 0, feedWs = null;       // loop token: re-entering must not stack timers
+let feedWired = false, feedLoop = 0, feedWs = null;
+let feedCredits = 2, feedInflight = 0;   // requests kept in flight       // loop token: re-entering must not stack timers
 
 // Left/right cycles how hard the frame is pushed for legibility on glass.
 // mono is usually the only one readable in a bright room.
 const FEED_MODES = ["mono", "boost", "raw"];
 let feedMode = 0;
+
+function setCredits(n){
+  feedCredits = Math.max(1, Math.min(4, n));
+  setFeedMode(feedMode);                 // repaint the status line
+  if (feedWs && feedWs.readyState === 1){
+    // Top up immediately so raising the dial takes effect on the next frame.
+    while (feedInflight < feedCredits){ feedWs.send("n"); feedInflight++; }
+  }
+}
 
 function setFeedMode(i){
   feedMode = (i + FEED_MODES.length) % FEED_MODES.length;
@@ -373,7 +389,8 @@ function setFeedMode(i){
   const img = $("feed");
   img.classList.remove("mono", "boost");   // never clobber .on
   if (m !== "raw") img.classList.add(m);
-  $("feed-src").textContent = m + (feedWs && feedWs.readyState === 1 ? " ws" : "");
+  $("feed-src").textContent =
+    m + (feedWs && feedWs.readyState === 1 ? " ws" : "") + " c" + feedCredits;
 }
 
 function feedPaint(url, isBlob){
@@ -401,18 +418,24 @@ function feedConnect(token){
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(proto + "://" + location.host + "/ws/cam");
   ws.binaryType = "blob";
-  feedWs = ws;
+  feedWs = ws; feedInflight = 0;
 
-  // Ask for one frame at a time. Requesting the next on arrival rather than
-  // after decode keeps the network busy while this one paints, but never lets
-  // more than a frame or so accumulate -- which is what put the feed ten
-  // seconds behind when the server pushed freely.
-  const ask = () => { if (ws.readyState === 1) ws.send("n"); };
+  // Credits, not a single outstanding request. One in flight means every frame
+  // costs a whole round trip, so the rate is capped at 1/RTT however small the
+  // JPEG is. Holding a few requests open lets the next travel while this one
+  // decodes. Each extra credit buys throughput and costs roughly one frame of
+  // lag, so it is a dial rather than a constant -- the right value depends on
+  // the venue's link, and up/down changes it live.
+  const ask = () => {
+    while (ws.readyState === 1 && feedInflight < feedCredits){
+      ws.send("n"); feedInflight++;
+    }
+  };
 
   ws.onopen    = () => { $("feed-src").textContent = FEED_MODES[feedMode] + " ws"; ask(); };
   ws.onmessage = (e) => {
     if (token !== feedLoop){ ws.close(); return; }
-    feedReq++;
+    feedReq++; feedInflight--;
     ask();
     feedPaint(URL.createObjectURL(e.data), true);
   };
