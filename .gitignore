@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# LeRobot outputs — datasets, recordings, checkpoints are too big for git
+outputs/
+wandb/
+
+# World Context dataset lives on the flash drive / local copy, never in git
+WORLD_CONTEXT_EXPLORER_V3/
+
+# OS
+.DS_Store
