@@ -16,3 +16,6 @@ WORLD_CONTEXT_EXPLORER_V3/
 
 # OS
 .DS_Store
+
+# Licensed font binaries stay local — demo machines copy them in manually
+web/fonts/

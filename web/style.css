@@ -1,6 +1,12 @@
 /* Muscle Memory — dark liquid-glass theme (demo runs on a projector).
-   Font: Airbnb Cereal when installed locally, Plus Jakarta Sans fallback.
+   Font: Airbnb Cereal Book served from /static/fonts (heavier weights are
+   browser-synthesized), Plus Jakarta Sans as the webfont fallback.
    Task identity is never color-alone (hover/legend/labels always name it). */
+@font-face{
+  font-family:"Airbnb Cereal";
+  src:url("fonts/AirbnbCereal_W_Bk.otf") format("opentype");
+  font-weight:400; font-style:normal; font-display:swap;
+}
 :root{
   --page:#0a0a0e; --ink:#ffffff; --ink-2:#d3d2c9; --muted:#94928b;
   --glass:rgba(24,24,30,.52); --glass-2:rgba(30,30,38,.46);
