@@ -138,20 +138,26 @@ def build_app(args) -> FastAPI:
     def phone():
         return FileResponse(WEB_DIR / "phone.html")
 
+    # FileResponse sends no Cache-Control, which lets a client heuristically
+    # cache the page off Last-Modified. The glasses WebView did exactly that
+    # and kept serving a stale build after a Restart, which is indistinguishable
+    # from the new code being broken.
+    NOCACHE = {"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"}
+
     @app.get("/camera")
     def camera():
         """Capture source: runs in a normal phone browser, not on the glasses.
         MRBD Web Apps have no camera, and the paired phone is a relay rather
         than something the glasses page can reach — so frames have to make the
         trip out to this server and back."""
-        return FileResponse(WEB_DIR / "camera.html")
+        return FileResponse(WEB_DIR / "camera.html", headers=NOCACHE)
 
     @app.get("/glasses")
     def glasses():
         """Meta Ray-Ban Display client. Same /ws/phone motion contract, but the
         IMU is head-mounted like the World Context capture rig, so queries hit
         the bank without the wrist/pocket placement gap."""
-        return FileResponse(WEB_DIR / "glasses.html")
+        return FileResponse(WEB_DIR / "glasses.html", headers=NOCACHE)
 
     @app.get("/api/meta")
     def meta():
