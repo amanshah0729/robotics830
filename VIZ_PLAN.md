@@ -11,7 +11,7 @@ updated: 2026-08-30
 
 **One line:** We teach an IMU to see. A small motion encoder, trained contrastively at the event against frozen CLIP video embeddings of the World Context dataset, lands raw inertial signals in the same space as images — so a text query, a video moment, or **a judge shaking a phone** all retrieve matching moments from hundreds of hours of skilled human work, laid out on an explorable atlas.
 
-**Track:** Visualization ($1,000 / $500). Hardware idea stays on ice (see `HACKATHON_PLAN.md`), and this codebase is deliberately robot-free.
+**Track:** Visualization.
 
 ---
 

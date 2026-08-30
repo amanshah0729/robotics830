@@ -2,7 +2,7 @@
 
 **Search hundreds of hours of skilled human work by motion alone.** A small IMU encoder, trained contrastively against frozen CLIP video embeddings of the World Context egocentric dataset, lands raw inertial signals in the same space as images — so a text query, a video moment, or a phone waved in your hand all retrieve matching moments, laid out on an explorable atlas.
 
-**Track:** Visualization. 📋 Active plan: **[VIZ_PLAN.md](VIZ_PLAN.md)** · 🧾 [BUILD_CARD.md](BUILD_CARD.md) · 🦾 (on ice: [HACKATHON_PLAN.md](HACKATHON_PLAN.md), the SO-101 hardware option)
+**Track:** Visualization. 📋 [VIZ_PLAN.md](VIZ_PLAN.md) · 🧾 [BUILD_CARD.md](BUILD_CARD.md)
 
 ## Quickstart — no dataset needed
 
