@@ -43,9 +43,11 @@ class State:
         idx = Path(args.index)
         if not (idx / "rows.npz").exists():
             raise SystemExit(f"no index at {idx}; run musclememory.index first")
-        self.bank_v = np.load(idx / "bank_video.npy").astype(np.float32)
+        # nan_to_num: windows with degenerate IMU (one dataset clip has a flat
+        # recording) embed to NaN; zeroed rows get cosine 0 and never rank.
+        self.bank_v = np.nan_to_num(np.load(idx / "bank_video.npy").astype(np.float32))
         p = idx / "bank_imu.npy"
-        self.bank_i = np.load(p).astype(np.float32) if p.exists() else None
+        self.bank_i = np.nan_to_num(np.load(p).astype(np.float32)) if p.exists() else None
         self.feats = np.load(idx / "feats.npy")
         st = np.load(idx / "feat_stats.npz")
         self.f_mean, self.f_std = st["mean"], st["std"]
