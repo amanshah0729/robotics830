@@ -60,6 +60,33 @@ than painting it, so mid-tones compete with the room. It is the right way to
 prove the transport, but bright vector overlays on black are what actually
 read on this display.
 
+## On the SO-101 arm
+
+Both robot tools run in a **LeRobot venv, not this repo's** — install once per machine:
+[huggingface/lerobot](https://github.com/huggingface/lerobot) `v0.6.1` with the `feetech`
+extra, plus `placo` for IK (`uv pip install placo` inside that venv). Calibrate your own
+arm once (`lerobot-calibrate --robot.type=so101_follower --robot.port=<PORT> --robot.id=<ID>`);
+find `<PORT>` with `lerobot-find-port` — it changes on every replug.
+
+**Drive the arm like a video game** (WASD + IK claw mode, TAB for direct joint mode,
+H glides home, ESC quits — full keymap in the script header):
+
+```bash
+<lerobot-venv>/bin/python scripts/keyboard_ee_teleop.py --port <PORT> --id <ID>
+```
+
+First run fetches the SO-ARM100 URDF (the script prints the exact command if it's
+missing). On macOS, grant your terminal app Accessibility permission or the keys
+silently do nothing.
+
+**Perform a retrieved moment on the robot** — the muscle-memory bridge polls the demo
+server for perform-jobs and re-synthesizes the matched window's motion character on
+the arm (rhythm and shape, not learned manipulation — say so on stage):
+
+```bash
+<lerobot-venv>/bin/python -m musclememory.perform --port <PORT> --robot-id <ID>   # --dry-run to preview
+```
+
 ## With the World Context flash drive
 
 ```bash
