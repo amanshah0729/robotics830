@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Muscle Memory</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div id="brand">MUSCLE&nbsp;MEMORY<span id="meta-stats"></span></div>
+  <input id="search" type="search" placeholder="search by text — e.g. “pouring liquid”" autocomplete="off">
+  <nav id="tabs">
+    <button class="tab active" data-tab="atlas">Atlas</button>
+    <button class="tab" data-tab="live">Live motion</button>
+  </nav>
+  <span id="space-badge" title="which space answers motion queries"></span>
+</header>
+
+<main id="view-atlas">
+  <div id="map-wrap">
+    <canvas id="map"></canvas>
+    <div id="legend" class="floating"></div>
+    <div id="tooltip" hidden></div>
+    <div id="hint" class="floating">scroll = zoom · drag = pan · click = inspect · esc = clear</div>
+  </div>
+  <aside id="panel">
+    <div id="panel-empty">Click a point to inspect a moment,<br>or search above.</div>
+    <div id="panel-detail" hidden>
+      <img id="d-frame" alt="frame at selected moment">
+      <div class="d-meta">
+        <div class="d-task" id="d-task"></div>
+        <div class="d-sub" id="d-sub"></div>
+      </div>
+      <div class="s-label">IMU |accel| ±6 s <span class="tick-key">· ticks = contact spikes</span></div>
+      <canvas id="spark" height="70"></canvas>
+      <div id="d-chapters"></div>
+      <button id="d-similar">Find visually similar moments</button>
+    </div>
+    <div id="panel-results" hidden>
+      <div class="s-label" id="r-title"></div>
+      <div id="r-list"></div>
+    </div>
+  </aside>
+</main>
+
+<main id="view-live" hidden>
+  <div id="live-left">
+    <h2>Live motion search</h2>
+    <p>Open <b id="phone-url"></b> on a phone on the same network, press start,
+       and move: the motion alone retrieves matching moments from the dataset.</p>
+    <p class="fineprint">iOS Safari needs HTTPS for motion sensors — use Android/Chrome,
+       or tunnel with <code>cloudflared tunnel --url http://localhost:7860</code>.</p>
+    <div class="s-label">phone motion energy</div>
+    <canvas id="energy" height="26"></canvas>
+    <div id="live-status">waiting for a phone…</div>
+  </div>
+  <div id="live-matches"></div>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

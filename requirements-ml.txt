@@ -1,0 +1,5 @@
+# ML extras — real CLIP embeddings, the learned IMU encoder, UMAP projection.
+# Install on the ingest/training machine (GPU strongly recommended for ingest).
+torch>=2.2
+open-clip-torch>=2.24
+umap-learn>=0.5.5

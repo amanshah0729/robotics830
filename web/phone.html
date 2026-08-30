@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Muscle Memory — phone sensor</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{ --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7;
+         --muted:#898781; --blue:#3987e5; --baseline:#383835; }
+  *{box-sizing:border-box}
+  body{margin:0; min-height:100dvh; background:var(--page); color:var(--ink);
+       font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+       display:flex; flex-direction:column; align-items:center; justify-content:center;
+       gap:22px; padding:24px; text-align:center}
+  h1{font-size:1.1em; letter-spacing:.08em; margin:0}
+  #start{background:var(--blue); color:#fff; border:0; border-radius:14px;
+         font:600 1.2em/1 inherit; padding:22px 44px; cursor:pointer}
+  #start:disabled{opacity:.4}
+  #bar{width:min(340px,80vw); height:18px; background:var(--surface);
+       border-radius:9px; overflow:hidden}
+  #fill{height:100%; width:0; background:var(--blue)}
+  #status{color:var(--muted); min-height:3em; max-width:36ch}
+  #match{color:var(--ink2); font-weight:600; min-height:1.5em}
+</style>
+</head>
+<body>
+<h1>MUSCLE MEMORY · PHONE</h1>
+<button id="start">Start streaming motion</button>
+<div id="bar"><div id="fill"></div></div>
+<div id="match"></div>
+<div id="status">Press start, allow motion access, then move the phone like a
+task — whisk, hammer, pour, wipe…</div>
+<script>
+"use strict";
+const status = (m) => document.getElementById("status").textContent = m;
+let ws = null, buf = [];
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws/phone`);
+  ws.onopen = () => status("connected — move the phone!");
+  ws.onclose = () => { status("connection lost, retrying…"); setTimeout(connect, 1500); };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "matches" && msg.matches.length) {
+      const m = msg.matches[0];
+      document.getElementById("match").textContent =
+        `top match: ${m.task.replace(/[_-]+/g, " ")} (${m.score.toFixed(2)})`;
+    }
+  };
+}
+
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity || e.acceleration || {};
+  const r = e.rotationRate || {};
+  const d2r = Math.PI / 180;
+  buf.push([performance.now() / 1000,
+            a.x || 0, a.y || 0, a.z || 0,
+            (r.alpha || 0) * d2r, (r.beta || 0) * d2r, (r.gamma || 0) * d2r]);
+  const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+  document.getElementById("fill").style.width =
+    Math.min(100, Math.abs(mag - 9.81) * 12) + "%";
+}
+
+setInterval(() => {
+  if (ws && ws.readyState === 1 && buf.length) {
+    ws.send(JSON.stringify({ samples: buf }));
+    buf = [];
+  }
+}, 150);
+
+document.getElementById("start").addEventListener("click", async () => {
+  try {
+    if (typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function") {
+      const p = await DeviceMotionEvent.requestPermission();  // iOS gate (needs HTTPS)
+      if (p !== "granted") { status("motion permission denied — on iOS this page must be served over HTTPS (use the cloudflared tunnel), or use an Android phone."); return; }
+    }
+    window.addEventListener("devicemotion", onMotion);
+    document.getElementById("start").disabled = true;
+    connect();
+  } catch (err) {
+    status("motion sensors unavailable: " + err + " — try Android/Chrome or the HTTPS tunnel.");
+  }
+});
+</script>
+</body>
+</html>

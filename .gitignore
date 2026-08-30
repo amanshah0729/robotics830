@@ -8,6 +8,9 @@ __pycache__/
 outputs/
 wandb/
 
+# Muscle Memory derived data / indexes / models
+work/
+
 # World Context dataset lives on the flash drive / local copy, never in git
 WORLD_CONTEXT_EXPLORER_V3/
 
