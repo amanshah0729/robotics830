@@ -84,11 +84,15 @@
   /* A photographic feed is the one thing this display renders badly — it adds
      light rather than painting it, so mid-tones wash out against the room.
      Fine as a transport proof; a vector overlay is what ships. */
-  #feed{
+  /* Two buffers. Assigning .src on the visible image blanks it while the new
+     frame decodes, which at 10 fps reads as constant flicker. Decode into the
+     hidden one and swap on load, so something complete is always on screen. */
+  #feedstage{position:absolute; inset:0}
+  .feedimg{
     position:absolute; inset:0; width:100%; height:100%;
     object-fit:contain; display:none;
   }
-  #feed.on{display:block}
+  .feedimg.on{display:block}
   /* Fullscreen drops the chrome so the frame gets all 600x600. Worth a toggle
      rather than a default: the fps and link state in the footer are what tell
      you the feed is alive when the picture is too dim to be sure. */
@@ -98,8 +102,8 @@
   /* Raw camera mid-tones are the worst case for an additive display: they add
      a dim haze that the lit room behind simply beats. Crushing blacks down and
      driving everything else up trades fidelity for being visible at all. */
-  #feed.boost{filter:contrast(1.9) brightness(1.25) saturate(1.35)}
-  #feed.mono {filter:grayscale(1) contrast(2.8) brightness(1.2)}
+  .feedimg.boost{filter:contrast(1.9) brightness(1.25) saturate(1.35)}
+  .feedimg.mono {filter:grayscale(1) contrast(2.8) brightness(1.2)}
   #feedmsg{position:absolute; inset:0; display:flex; align-items:center;
            justify-content:center; padding:20px; text-align:center;
            color:var(--ink2); font-size:20px}
@@ -160,7 +164,7 @@
   <button class="focusable" data-go="feed"><span class="k">◉</span>Camera feed</button>
   <button class="focusable" data-go="jog"><span class="k">✥</span>Teleop</button>
   <button class="focusable" data-go="diag"><span class="k">⚙</span>Diagnostics</button>
-  <footer><span>swipe ↑↓ · pinch = select · b151202</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
+  <footer><span>swipe ↑↓ · pinch = select · b163714</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
 </section>
 
 <!-- ============ LIVE ============ -->
@@ -177,7 +181,10 @@
 <section id="s-feed" class="screen">
   <header><h1>FEED</h1><span class="tag" id="feed-src">mono</span></header>
   <div id="feedwrap">
-    <img id="feed" alt="">
+    <div id="feedstage">
+      <img class="feedimg" id="feedA" alt="">
+      <img class="feedimg" id="feedB" alt="">
+    </div>
     <div id="feedmsg">waiting for a frame…</div>
   </div>
   <footer><span id="feed-fps">0.0 fps</span><span id="feed-tally">req0 ok0 err0</span><span id="feed-age">—</span></footer>
@@ -245,7 +252,7 @@ function show(name){
     // One <img> serves both screens: reparent it instead of running a second
     // socket and paying twice for the same frames.
     const host = name === "jog" ? $("jogwrap") : $("feedwrap");
-    if ($("feed").parentNode !== host) host.appendChild($("feed"));
+    if ($("feedstage").parentNode !== host) host.appendChild($("feedstage"));
     setFeedMode(feedMode);
     feedConnect(++feedLoop);
   }
@@ -454,26 +461,38 @@ function setCredits(n){
 function setFeedMode(i){
   feedMode = (i + FEED_MODES.length) % FEED_MODES.length;
   const m = FEED_MODES[feedMode];
-  const img = $("feed");
-  img.classList.remove("mono", "boost");   // never clobber .on
-  if (m !== "raw") img.classList.add(m);
+  for (const img of [$("feedA"), $("feedB")]){
+    img.classList.remove("mono", "boost");   // never clobber .on
+    if (m !== "raw") img.classList.add(m);
+  }
   $("feed-src").textContent =
     m + (feedWs && feedWs.readyState === 1 ? " ws" : "") + " c" + feedCredits;
 }
 
+let feedFront = 0;                          // which buffer is on screen
+
 function feedPaint(url, isBlob){
-  const img = $("feed");
-  const prev = img.dataset.blob;
-  img.onload = () => {
-    img.classList.add("on");
+  const bufs = [$("feedA"), $("feedB")];
+  const back = bufs[1 - feedFront], front = bufs[feedFront];
+  const prevUrl = back.dataset.blob;        // this buffer's previous frame
+
+  back.onload = () => {
+    back.classList.add("on");
+    front.classList.remove("on");
+    feedFront = 1 - feedFront;
     $("feedmsg").style.display = "none";
     feedShown++; feedCount++; feedTally();
     $("feed-age").textContent = "live";
-    if (prev) URL.revokeObjectURL(prev);   // only once the successor is up
+    // Revoke only once the successor is displayed; doing it earlier can pull
+    // the blob out from under a decode still in flight.
+    if (prevUrl) URL.revokeObjectURL(prevUrl);
   };
-  img.onerror = () => { feedErr++; feedTally(); };
-  if (isBlob) img.dataset.blob = url; else delete img.dataset.blob;
-  img.src = url;
+  back.onerror = () => {
+    feedErr++; feedTally();
+    if (isBlob) URL.revokeObjectURL(url);   // nothing will ever display it
+  };
+  if (isBlob) back.dataset.blob = url; else delete back.dataset.blob;
+  back.src = url;
 }
 
 /* Push beats polling here by a wide margin: a polled frame costs a full round
@@ -518,36 +537,32 @@ function feedConnect(token){
 
 function feedTick(token){
   if (!FEED_SCREENS.includes(current) || token !== feedLoop) return;
-  const img = $("feed");
-
+  // Fetch through a throwaway probe, then hand the finished image to the same
+  // double-buffered paint the socket path uses -- otherwise the fallback would
+  // reintroduce the flicker it exists to avoid.
+  const probe = new Image();
   let settled = false;
   const finish = (ok) => {
     if (settled) return;
     settled = true;
     clearTimeout(watchdog);
-    if (!ok){
+    if (ok){
+      feedPaint(probe.src, false);
+    } else {
       feedErr++;
       if (!feedShown)
         $("feedmsg").textContent =
-          "no frames yet — open /camera on your phone and press Start";
+          "no frames yet — open /camera and press Start";
       $("feed-age").textContent = "stale";
       feedTally();
     }
     setTimeout(() => feedTick(token), FEED_GAP);
   };
-
-  img.onload  = () => {
-    img.classList.add("on");
-    $("feedmsg").style.display = "none";
-    feedShown++; feedCount++; feedTally();
-    $("feed-age").textContent = "live";
-    finish(true);
-  };
-  img.onerror = () => finish(false);
+  probe.onload  = () => finish(true);
+  probe.onerror = () => finish(false);
   const watchdog = setTimeout(() => finish(false), 5000);
-
   feedReq++; feedTally();
-  img.src = "/api/cam/latest?cb=" + Date.now();
+  probe.src = "/api/cam/latest?cb=" + Date.now();
 }
 
 setInterval(() => {
