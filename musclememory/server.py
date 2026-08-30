@@ -316,6 +316,28 @@ def build_app(args) -> FastAPI:
                 "bytes": len(cam["jpeg"]) if cam["jpeg"] else 0,
                 "pulls": cam["pulls"], "last_pull_ua": cam["last_pull_ua"]}
 
+    @app.websocket("/ws/cam")
+    async def ws_cam(ws: WebSocket):
+        """Push frames instead of letting the client poll for them.
+
+        Polling costs a full round trip per frame, so the frame rate collapses
+        to 1/latency no matter how small the JPEG is -- which is why shrinking
+        the payload changed nothing. Awaiting each send paces this loop to
+        whatever the client can actually drain, so a slow link drops frames
+        rather than building a backlog of stale ones.
+        """
+        await ws.accept()
+        sent_n = -1
+        try:
+            while True:
+                if cam["jpeg"] is not None and cam["n"] != sent_n:
+                    sent_n = cam["n"]
+                    await ws.send_bytes(cam["jpeg"])
+                else:
+                    await asyncio.sleep(0.02)
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
     # ---------------- live phone bridge ----------------
 
     async def _broadcast(msg: dict):

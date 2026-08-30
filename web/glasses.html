@@ -122,7 +122,7 @@
   <button class="focusable" data-go="live"><span class="k">▶</span>Start motion search</button>
   <button class="focusable" data-go="feed"><span class="k">◉</span>Camera feed</button>
   <button class="focusable" data-go="diag"><span class="k">⚙</span>Diagnostics</button>
-  <footer><span>swipe ↑↓ · pinch = select · b140437</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
+  <footer><span>swipe ↑↓ · pinch = select · b141225</span><span id="home-ws"><span class="dot"></span> offline</span></footer>
 </section>
 
 <!-- ============ LIVE ============ -->
@@ -188,7 +188,8 @@ function show(name){
   if (first) first.focus();
   if (name === "diag") probeTick();
   if (name !== "feed") $("s-feed").classList.remove("fs");
-  if (name === "feed") feedTick(++feedLoop);
+  if (name !== "feed" && feedWs){ feedWs.close(); feedWs = null; }
+  if (name === "feed"){ setFeedMode(feedMode); feedConnect(++feedLoop); }
 }
 
 function focusables(){
@@ -359,7 +360,7 @@ let feedShown = 0, feedTickAt = performance.now(), feedCount = 0;
 let feedReq = 0, feedErr = 0;
 const feedTally = () => $("feed-tally").textContent =
   "req" + feedReq + " ok" + feedShown + " err" + feedErr;
-let feedWired = false, feedLoop = 0;       // loop token: re-entering must not stack timers
+let feedWired = false, feedLoop = 0, feedWs = null;       // loop token: re-entering must not stack timers
 
 // Left/right cycles how hard the frame is pushed for legibility on glass.
 // mono is usually the only one readable in a bright room.
@@ -372,46 +373,79 @@ function setFeedMode(i){
   const img = $("feed");
   img.classList.remove("mono", "boost");   // never clobber .on
   if (m !== "raw") img.classList.add(m);
-  $("feed-src").textContent = m;
+  $("feed-src").textContent = m + (feedWs && feedWs.readyState === 1 ? " ws" : "");
+}
+
+function feedPaint(url, isBlob){
+  const img = $("feed");
+  const prev = img.dataset.blob;
+  img.onload = () => {
+    img.classList.add("on");
+    $("feedmsg").style.display = "none";
+    feedShown++; feedCount++; feedTally();
+    $("feed-age").textContent = "live";
+    if (prev) URL.revokeObjectURL(prev);   // only once the successor is up
+  };
+  img.onerror = () => { feedErr++; feedTally(); };
+  if (isBlob) img.dataset.blob = url; else delete img.dataset.blob;
+  img.src = url;
+}
+
+/* Push beats polling here by a wide margin: a polled frame costs a full round
+   trip, pinning the rate at 1/latency regardless of JPEG size -- which is why
+   dropping resolution and quality changed nothing. One socket, frames arriving
+   as they are produced. Polling stays as the fallback for when the socket
+   cannot be established. */
+function feedConnect(token){
+  if (current !== "feed" || token !== feedLoop) return;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(proto + "://" + location.host + "/ws/cam");
+  ws.binaryType = "blob";
+  feedWs = ws;
+
+  ws.onopen    = () => { $("feed-src").textContent = FEED_MODES[feedMode] + " ws"; };
+  ws.onmessage = (e) => {
+    if (token !== feedLoop){ ws.close(); return; }
+    feedReq++;
+    feedPaint(URL.createObjectURL(e.data), true);
+  };
+  ws.onerror   = () => {};
+  ws.onclose   = () => {
+    if (token !== feedLoop || current !== "feed") return;
+    // Fall back to polling; slow, but a visible feed beats a blank one.
+    $("feed-src").textContent = FEED_MODES[feedMode] + " poll";
+    feedTick(token);
+  };
 }
 
 function feedTick(token){
   if (current !== "feed" || token !== feedLoop) return;
   const img = $("feed");
 
-  if (!feedWired){
-    feedWired = true;
-    setFeedMode(feedMode);
-  }
-
-  // Self-clocking: request the next frame only once this one resolves. A fixed
-  // timer instead assigns .src while the previous fetch is still in flight,
-  // which aborts it -- and an aborted image load fires neither load nor error,
-  // so the screen stays empty while the server happily logs the requests.
   let settled = false;
   const finish = (ok) => {
     if (settled) return;
     settled = true;
     clearTimeout(watchdog);
-    if (ok){
-      img.classList.add("on");
-      $("feedmsg").style.display = "none";
-      feedShown++; feedCount++;
-      $("feed-age").textContent = "live";
-    } else {
+    if (!ok){
       feedErr++;
       if (!feedShown)
         $("feedmsg").textContent =
           "no frames yet — open /camera on your phone and press Start";
       $("feed-age").textContent = "stale";
+      feedTally();
     }
-    feedTally();
     setTimeout(() => feedTick(token), FEED_GAP);
   };
 
-  img.onload  = () => finish(true);
+  img.onload  = () => {
+    img.classList.add("on");
+    $("feedmsg").style.display = "none";
+    feedShown++; feedCount++; feedTally();
+    $("feed-age").textContent = "live";
+    finish(true);
+  };
   img.onerror = () => finish(false);
-  // A hung fetch would otherwise stall the chain forever.
   const watchdog = setTimeout(() => finish(false), 5000);
 
   feedReq++; feedTally();
