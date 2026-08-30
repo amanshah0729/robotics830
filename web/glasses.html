@@ -73,15 +73,30 @@
   .dot.ok{background:var(--good)} .dot.warm{background:var(--warn)}
 
   /* ---- camera feed ---- */
+  /* position:relative + inset:0 on the image so its box is definite. Sizing it
+     with max-height:100% instead lets a flex parent of indefinite height
+     resolve the image to zero height -- it renders nothing, reports no error,
+     and loads perfectly well while staying invisible. */
   #feedwrap{
-    flex:1 1 auto; display:flex; align-items:center; justify-content:center;
+    position:relative; flex:1 1 auto; min-height:0;
     border:2px solid var(--dim); border-radius:12px; overflow:hidden; background:#000;
   }
   /* A photographic feed is the one thing this display renders badly — it adds
      light rather than painting it, so mid-tones wash out against the room.
      Fine as a transport proof; a vector overlay is what ships. */
-  #feed{max-width:100%; max-height:100%; object-fit:contain; display:block}
-  #feedmsg{color:var(--ink2); font-size:20px; padding:20px; text-align:center}
+  #feed{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:contain; display:none;
+  }
+  #feed.on{display:block}
+  /* Raw camera mid-tones are the worst case for an additive display: they add
+     a dim haze that the lit room behind simply beats. Crushing blacks down and
+     driving everything else up trades fidelity for being visible at all. */
+  #feed.boost{filter:contrast(1.9) brightness(1.25) saturate(1.35)}
+  #feed.mono {filter:grayscale(1) contrast(2.8) brightness(1.2)}
+  #feedmsg{position:absolute; inset:0; display:flex; align-items:center;
+           justify-content:center; padding:20px; text-align:center;
+           color:var(--ink2); font-size:20px}
 
   /* ---- diagnostics ---- */
   #diag{font:17px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink2)}
@@ -117,7 +132,10 @@
 <!-- ============ CAMERA FEED ============ -->
 <section id="s-feed" class="screen">
   <header><h1>FEED</h1><span class="tag" id="feed-src">phone</span></header>
-  <div id="feedwrap"><div id="feedmsg">waiting for a frame…</div></div>
+  <div id="feedwrap">
+    <img id="feed" alt="">
+    <div id="feedmsg">waiting for a frame…</div>
+  </div>
   <footer><span id="feed-fps">0.0 fps</span><span id="feed-age">—</span></footer>
 </section>
 
@@ -163,7 +181,7 @@ function show(name){
   const first = screens[name].querySelector(".focusable");
   if (first) first.focus();
   if (name === "diag") probeTick();
-  if (name === "feed") feedTick();
+  if (name === "feed") feedTick(++feedLoop);
 }
 
 function focusables(){
@@ -195,8 +213,12 @@ document.addEventListener("keydown", (e) => {
   keyLog.length = Math.min(keyLog.length, 8);
   $("d-key").textContent = keyLog.join(" ");
   switch (e.key){
-    case KEY.UP: case KEY.LEFT:    moveFocus(-1); break;
-    case KEY.DOWN: case KEY.RIGHT: moveFocus(+1); break;
+    case KEY.UP: case KEY.LEFT:
+      if (current === "feed") setFeedMode(feedMode - 1); else moveFocus(-1);
+      break;
+    case KEY.DOWN: case KEY.RIGHT:
+      if (current === "feed") setFeedMode(feedMode + 1); else moveFocus(+1);
+      break;
     case KEY.SELECT:
       if (document.activeElement && document.activeElement.classList.contains("focusable"))
         document.activeElement.click();
@@ -322,27 +344,44 @@ function probeTick(){
    nothing and there is no stream to resynchronise.
 --------------------------------------------------------------------------- */
 const FEED_MS = 200;                       // ~5 fps; matches the push cadence
-let feedImg = null, feedShown = 0, feedTickAt = performance.now(), feedCount = 0;
+let feedShown = 0, feedTickAt = performance.now(), feedCount = 0;
+let feedWired = false, feedLoop = 0;       // loop token: re-entering must not stack timers
 
-function feedTick(){
-  if (current !== "feed") return;
-  if (!feedImg){
-    feedImg = new Image();
-    feedImg.id = "feed";
-    feedImg.onload = () => {
-      const wrap = $("feedwrap");
-      if (feedImg.parentNode !== wrap){ wrap.innerHTML = ""; wrap.appendChild(feedImg); }
+// Left/right cycles how hard the frame is pushed for legibility on glass.
+// mono is usually the only one readable in a bright room.
+const FEED_MODES = ["mono", "boost", "raw"];
+let feedMode = 0;
+
+function setFeedMode(i){
+  feedMode = (i + FEED_MODES.length) % FEED_MODES.length;
+  const m = FEED_MODES[feedMode];
+  const img = $("feed");
+  img.classList.remove("mono", "boost");   // never clobber .on
+  if (m !== "raw") img.classList.add(m);
+  $("feed-src").textContent = m;
+}
+
+function feedTick(token){
+  if (current !== "feed" || token !== feedLoop) return;
+  const img = $("feed");
+  if (!feedWired){
+    feedWired = true;
+    img.onload = () => {
+      img.classList.add("on");
+      $("feedmsg").style.display = "none";
       feedShown++; feedCount++;
       $("feed-age").textContent = "live";
     };
-    feedImg.onerror = () => {
-      if (!feedShown) $("feedmsg").textContent =
-        "no frames yet — open /camera on your phone and press Start";
+    img.onerror = () => {
+      if (!feedShown)
+        $("feedmsg").textContent =
+          "no frames yet — open /camera on your phone and press Start";
       $("feed-age").textContent = "stale";
     };
+    setFeedMode(feedMode);
   }
-  feedImg.src = "/api/cam/latest?cb=" + Date.now();
-  setTimeout(feedTick, FEED_MS);
+  img.src = "/api/cam/latest?cb=" + Date.now();
+  setTimeout(() => feedTick(token), FEED_MS);
 }
 
 setInterval(() => {

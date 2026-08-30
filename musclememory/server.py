@@ -282,7 +282,7 @@ def build_app(args) -> FastAPI:
     # Deliberately last-frame-wins with no queue: a stalled consumer should see
     # a fresh frame when it comes back, never work through a backlog of stale
     # ones. Frames are small and disposable, so nothing is persisted.
-    cam = {"jpeg": None, "at": 0.0, "n": 0}
+    cam = {"jpeg": None, "at": 0.0, "n": 0, "pulls": 0, "last_pull_ua": ""}
 
     @app.post("/api/cam/push")
     async def cam_push(request: Request):
@@ -293,7 +293,11 @@ def build_app(args) -> FastAPI:
         return {"ok": True, "n": cam["n"], "bytes": len(body)}
 
     @app.get("/api/cam/latest")
-    def cam_latest():
+    def cam_latest(request: Request):
+        # Counted so a consumer that never asks can be told apart from one that
+        # asks and fails to render -- the two look identical on the glasses.
+        cam["pulls"] += 1
+        cam["last_pull_ua"] = request.headers.get("user-agent", "")[:120]
         if cam["jpeg"] is None:
             raise HTTPException(404, "no frame pushed yet")
         return Response(cam["jpeg"], media_type="image/jpeg",
@@ -303,7 +307,8 @@ def build_app(args) -> FastAPI:
     def cam_status():
         return {"frames": cam["n"],
                 "age_s": round(time.time() - cam["at"], 2) if cam["n"] else None,
-                "bytes": len(cam["jpeg"]) if cam["jpeg"] else 0}
+                "bytes": len(cam["jpeg"]) if cam["jpeg"] else 0,
+                "pulls": cam["pulls"], "last_pull_ua": cam["last_pull_ua"]}
 
     # ---------------- live phone bridge ----------------
 

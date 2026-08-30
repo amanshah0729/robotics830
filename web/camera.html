@@ -17,7 +17,9 @@
   button{background:var(--blue); color:#fff; border:0; border-radius:14px;
          font:600 1.1em/1 inherit; padding:18px 34px; cursor:pointer}
   button:disabled{opacity:.4}
-  video{display:none}
+  /* iOS won't decode a display:none video — drawImage would copy blank
+     frames with no error. Keep it in layout, just invisible. */
+  video{position:absolute; width:1px; height:1px; opacity:0; pointer-events:none}
   canvas{width:min(320px,84vw); border-radius:12px; background:#000;
          border:1px solid #2a2a28}
   #stats{display:flex; gap:18px; font:14px/1.4 ui-monospace,Menlo,monospace;
@@ -112,8 +114,15 @@ setInterval(() => {
   frames = 0; lastTick = now;
 }, 1000);
 
+// Safari can restore this page from the back-forward cache with the button
+// still disabled from a previous run, which looks exactly like a dead button.
+// Never trust the restored state.
+$("start").disabled = false;
+
 $("start").addEventListener("click", async () => {
   try {
+    $("start").disabled = true;
+    $("start").textContent = "Starting…";
     setState("requesting camera", false);
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: $("rear").checked ? "environment" : "user",
@@ -122,17 +131,19 @@ $("start").addEventListener("click", async () => {
     });
     v.srcObject = stream;
     await v.play();
-    $("start").disabled = true;
+    $("start").textContent = "Streaming";
     $("status").textContent = "Streaming. Open /glasses on the Meta Ray-Ban " +
       "Display and pick Camera feed.";
     draw();
     timer = setInterval(pushFrame, SEND_MS);
     setState("streaming", true);
   } catch (err) {
+    $("start").disabled = false;
+    $("start").textContent = "Retry camera";
     setState("camera blocked", false);
-    $("status").textContent = "Camera unavailable: " + err.name +
-      ". getUserMedia needs HTTPS — load this page through the cloudflared " +
-      "tunnel, not a LAN IP.";
+    $("status").textContent = "Camera unavailable: " + (err.name || err) +
+      " — " + (err.message || "") + ". getUserMedia needs HTTPS and a browser " +
+      "that allows it; Safari and Chrome both work, in-app browsers often do not.";
   }
 });
 </script>
