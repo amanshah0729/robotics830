@@ -274,6 +274,23 @@ def build_app(args) -> FastAPI:
         return {"stub": S.embedder_kind != "clip",
                 "results": await loop.run_in_executor(None, run)}
 
+    # ---------------- robot performer bridge ----------------
+    # The SO-101 performer (musclememory/perform.py, lerobot venv) polls
+    # /next; the UI queues rows via /perform. In-memory, tiny, demo-grade.
+    robot_q: deque = deque(maxlen=4)
+
+    @app.post("/api/robot/perform")
+    async def robot_perform(payload: dict):
+        row = payload.get("row")
+        if row is None or not (0 <= int(row) < len(S.t)):
+            raise HTTPException(400, "need a valid row")
+        robot_q.append(int(row))
+        return {"queued": int(row), "depth": len(robot_q)}
+
+    @app.get("/api/robot/next")
+    def robot_next():
+        return {"row": robot_q.popleft()} if robot_q else {}
+
     @app.post("/api/search/motion")
     async def search_motion(payload: dict):
         samples = np.asarray(payload.get("samples", []), dtype=np.float32)

@@ -255,6 +255,38 @@ $("d-similar").addEventListener("click", async () => {
   renderResults(`similar to ${pretty(S.selected.task)} @ ${S.selected.t}s`, res.results, false);
 });
 
+/* ---- robot bridge: queue a row for the SO-101 performer ---- */
+async function robotPerform(row) {
+  try {
+    const r = await (await fetch("/api/robot/perform", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ row }),
+    })).json();
+    return r.queued !== undefined;
+  } catch { return false; }
+}
+
+$("d-robot").addEventListener("click", async () => {
+  if (!S.selected) return;
+  const b = $("d-robot");
+  b.disabled = true;
+  const ok = await robotPerform(S.selected.row);
+  b.textContent = ok ? "🦾 Queued — arm performing…" : "🦾 Queue failed";
+  setTimeout(() => {
+    b.textContent = "🦾 Perform this motion on the SO-101";
+    b.disabled = false;
+  }, 6500);
+});
+
+let lastAutoPerform = 0;
+function maybeAutoPerform(matches) {
+  if (!$("live-robot").checked || !matches.length) return;
+  const now = performance.now();
+  if (now - lastAutoPerform < 9000) return;   // one move at a time
+  lastAutoPerform = now;
+  robotPerform(matches[0].row);
+}
+
 /* ---------------- text search ---------------- */
 
 async function runTextSearch(q) {
@@ -438,6 +470,7 @@ function connectLive() {
       drawEnergy(msg.energy);
       renderWords(msg.words);
       cometUpdate(msg.matches);
+      maybeAutoPerform(msg.matches);
       const grid = $("live-matches");
       grid.innerHTML = "";
       for (const m of msg.matches) grid.appendChild(matchCard(m));

@@ -165,6 +165,17 @@ main{flex:1; display:flex; min-height:0}
   transition:border-color .15s, box-shadow .15s;
 }
 #d-similar:hover{border-color:rgba(57,135,229,.7); box-shadow:0 0 18px rgba(57,135,229,.18)}
+#d-robot{
+  margin-top:8px; width:100%; color:var(--ink); font:inherit; font-weight:600;
+  background:linear-gradient(rgba(217,89,38,.22),rgba(217,89,38,.08));
+  border:1px solid rgba(217,89,38,.5); border-radius:var(--r-md); padding:9px; cursor:pointer;
+  transition:border-color .15s, box-shadow .15s;
+}
+#d-robot:hover{border-color:rgba(217,89,38,.9); box-shadow:0 0 18px rgba(217,89,38,.25)}
+#d-robot:disabled{opacity:.5; cursor:default}
+#live-robot-row{display:flex; gap:8px; align-items:center; margin-top:12px;
+  color:var(--ink-2); font-size:.9em; cursor:pointer}
+#live-robot-row input{accent-color:var(--s2)}
 .r-item{
   display:flex; gap:10px; padding:8px; border-radius:var(--r-md); cursor:pointer;
   align-items:center; border:1px solid transparent;
